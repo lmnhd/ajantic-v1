@@ -1,0 +1,154 @@
+<mxfile host="65bd71144e">
+    <diagram id="A6CX9e9HB7uP02hDHY6C" name="Page-1">
+        <mxGraphModel dx="780" dy="423" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="2" value="Next_Auth_Tool&lt;br&gt;" style="whiteSpace=wrap;html=1;" parent="1" vertex="1">
+                    <mxGeometry x="30" y="30" width="160" height="210" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" style="edgeStyle=none;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=12;fontColor=#FF8000;" parent="1" source="3" target="6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="3" value="&lt;div style=&quot;color: rgb(255, 139, 86); background-color: rgb(17, 17, 17); font-family: Consolas, &amp;quot;Courier New&amp;quot;, monospace; font-size: 10px; line-height: 19px;&quot;&gt;makeFetchRequest()&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="40" width="120" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="4" value="&lt;div style=&quot;color: rgb(255, 139, 86); background-color: rgb(17, 17, 17); font-family: Consolas, &amp;quot;Courier New&amp;quot;, monospace; font-size: 10px; line-height: 19px;&quot;&gt;queryAPIHelp()&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="70" width="120" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="38" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;fontSize=12;fontColor=#7F00FF;" parent="1" source="5" target="10" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="5" value="&lt;font color=&quot;#ff8000&quot; style=&quot;font-size: 11px;&quot;&gt;resolveErrors()&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="100" width="120" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="9" style="edgeStyle=none;html=1;fontSize=12;fontColor=#CC0000;" parent="1" source="6" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="190" y="50" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="6" value="&lt;div style=&quot;color: rgb(255, 139, 86); background-color: rgb(17, 17, 17); font-family: Consolas, &amp;quot;Courier New&amp;quot;, monospace; line-height: 19px;&quot;&gt;&lt;span style=&quot;color: rgb(185, 115, 255);&quot;&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;TOOLFUNCTION&lt;/font&gt;&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;color: rgb(255, 139, 86); background-color: rgb(17, 17, 17); font-family: Consolas, &amp;quot;Courier New&amp;quot;, monospace; font-size: 14px; line-height: 19px;&quot;&gt;&lt;span style=&quot;color: rgb(185, 115, 255); font-size: 10px;&quot;&gt;makeFetchRequest&lt;/span&gt;&lt;/div&gt;" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fontSize=11;fontColor=#FF8000;" parent="1" vertex="1">
+                    <mxGeometry x="310" y="40" width="130" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="&lt;div style=&quot;font-size: 11px; color: rgb(255, 139, 86); background-color: rgb(17, 17, 17); font-family: Consolas, &amp;quot;Courier New&amp;quot;, monospace; line-height: 19px;&quot;&gt;&lt;span style=&quot;color: rgb(185, 115, 255);&quot;&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;TOOLFUNCTION&lt;/font&gt;&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;background-color: rgb(17, 17, 17); font-family: Consolas, &amp;quot;Courier New&amp;quot;, monospace; line-height: 19px;&quot;&gt;&lt;font color=&quot;#b973ff&quot;&gt;&lt;span style=&quot;font-size: 10px;&quot;&gt;fixErrors&lt;/span&gt;&lt;/font&gt;&lt;/div&gt;" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fontSize=12;fontColor=#CC0000;verticalAlign=top;" parent="1" vertex="1">
+                    <mxGeometry x="315" y="150" width="210" height="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="28" style="edgeStyle=none;html=1;fontSize=12;fontColor=#99FF33;entryX=0;entryY=0.136;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" source="11" target="16" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="start 'TOOL-OPTIMIZATION' object" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#80FF00;" parent="1" vertex="1">
+                    <mxGeometry x="340" y="200" width="160" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="35" style="edgeStyle=orthogonalEdgeStyle;html=1;entryX=0;entryY=0.05;entryDx=0;entryDy=0;entryPerimeter=0;fontSize=12;fontColor=#7F00FF;curved=1;" parent="1" source="12" target="29" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="310" y="240"/>
+                            <mxPoint x="310" y="410"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="12" value="iterate process" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#80FF00;" parent="1" vertex="1">
+                    <mxGeometry x="340" y="230" width="160" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="36" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;entryX=-0.006;entryY=0.111;entryDx=0;entryDy=0;entryPerimeter=0;fontSize=12;fontColor=#7F00FF;" parent="1" source="14" target="24" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="580" y="275"/>
+                            <mxPoint x="580" y="440"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="14" value="summarize and store to memory" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#80FF00;" parent="1" vertex="1">
+                    <mxGeometry x="340" y="260" width="160" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="37" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;entryX=1;entryY=0.75;entryDx=0;entryDy=0;fontSize=12;fontColor=#7F00FF;fillColor=#008a00;strokeColor=#005700;" parent="1" source="15" target="5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="15" value="return valid code to agent" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#80FF00;" parent="1" vertex="1">
+                    <mxGeometry x="340" y="290" width="160" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="39" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;fontSize=12;fontColor=#7F00FF;exitX=0;exitY=0.75;exitDx=0;exitDy=0;fillColor=#60a917;strokeColor=#2D7600;endSize=11;startSize=11;" parent="1" source="16" target="11" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="16" value="" style="whiteSpace=wrap;html=1;fontSize=12;fontColor=#80FF00;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="160" width="170" height="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="41" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;fontSize=12;fontColor=#7F00FF;startSize=11;endSize=11;" parent="1" source="17" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="510" y="210" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="17" value="&lt;font color=&quot;#9933ff&quot;&gt;start history store process&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#80FF00;" parent="1" vertex="1">
+                    <mxGeometry x="660" y="170" width="150" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="18" value="&lt;font color=&quot;#99ff33&quot;&gt;takes a function name for namespace&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="200" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="20" value="&lt;font color=&quot;#99ff33&quot;&gt;contains an array for process message steps&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="280" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="23" value="&lt;font color=&quot;#99ff33&quot;&gt;check for previous solutions&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="240" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="44" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;entryX=1;entryY=0.25;entryDx=0;entryDy=0;fontSize=14;fontColor=#B266FF;startSize=11;endSize=11;fillColor=#60a917;strokeColor=#2D7600;" parent="1" source="24" target="14" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="24" value="" style="whiteSpace=wrap;html=1;aspect=fixed;fontSize=12;fontColor=#99FF33;" parent="1" vertex="1">
+                    <mxGeometry x="641" y="420" width="180" height="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="25" value="&lt;font color=&quot;#99ff33&quot;&gt;summarize&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="460" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="27" value="&lt;font color=&quot;#99ff33&quot;&gt;store to pinecone and postgres&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="646" y="495" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="29" value="" style="whiteSpace=wrap;html=1;aspect=fixed;fontSize=12;fontColor=#99FF33;" parent="1" vertex="1">
+                    <mxGeometry x="340" y="400" width="200" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="30" value="&lt;font color=&quot;#7f00ff&quot;&gt;iterator&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="355" y="400" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="31" value="&lt;font color=&quot;#99ff33&quot;&gt;takes in the failing params&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="355" y="440" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="32" value="&lt;font color=&quot;#99ff33&quot;&gt;runs the process in sandbox&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="355" y="480" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="33" value="&lt;font color=&quot;#99ff33&quot;&gt;reports results&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="355" y="520" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="40" style="edgeStyle=orthogonalEdgeStyle;curved=1;html=1;fontSize=12;fontColor=#7F00FF;fillColor=#d80073;strokeColor=#A50040;" parent="1" source="34" target="12" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="520" y="230" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="440" y="550"/>
+                            <mxPoint x="600" y="550"/>
+                            <mxPoint x="600" y="230"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="34" value="&lt;font color=&quot;#99ff33&quot;&gt;decides to retry or end&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="355" y="560" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="43" value="&lt;font style=&quot;font-size: 14px;&quot; color=&quot;#b266ff&quot;&gt;finish&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fontColor=#9933FF;" parent="1" vertex="1">
+                    <mxGeometry x="650" y="420" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="45" value="add logic to mem check to check for stored platform solutions" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fontColor=#B266FF;" parent="1" vertex="1">
+                    <mxGeometry x="30" y="155" width="160" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="46" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;storage options&lt;/font&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;fontSize=14;fontColor=#B266FF;verticalAlign=top;" parent="1" vertex="1">
+                    <mxGeometry x="550" y="680" width="230" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="47" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;dyanamic namespace for standar mem to pull.&lt;br&gt;Store detailed summary to pinecone.&lt;br&gt;Store process history to db&lt;br&gt;&lt;br&gt;&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontColor=#B266FF;" parent="1" vertex="1">
+                    <mxGeometry x="560" y="730" width="210" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="48" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;pre-chat-analysis&lt;/font&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;fontSize=14;fontColor=#B266FF;verticalAlign=top;" parent="1" vertex="1">
+                    <mxGeometry x="100" y="670" width="280" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="49" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;1. decide if query may possibly have process-step-memory&lt;br&gt;2. if so, use a model to query the databases and sort out valid info&lt;br&gt;&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontColor=#B266FF;" parent="1" vertex="1">
+                    <mxGeometry x="110" y="720" width="260" height="200" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

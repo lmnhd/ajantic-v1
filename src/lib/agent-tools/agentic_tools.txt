@@ -1,0 +1,163 @@
+import { SerpAPIClient,  } from '@agentic/serpapi'
+import {BingClient} from '@agentic/bing'
+import {calculator} from '@agentic/calculator'
+import {TavilyClient} from '@agentic/tavily'
+import {JinaClient} from '@agentic/jina'
+import {SocialDataClient} from '@agentic/social-data'
+import { NovuClient} from '@agentic/novu'
+import { FirecrawlClient } from '@agentic/firecrawl'
+import { ExaClient } from '@agentic/exa'
+import { tool } from 'ai';
+import z from 'zod'
+
+
+
+export const AGENT_TOOLS_agentic = {
+    serpapi: tool({
+        description: "Search the web using SerpAPI",
+        parameters: z.object({
+            query: z.string().describe("The query to search for"),
+        }),
+        execute: async ({query}) => {
+            console.log("AGENTIC_TOOLS_serpapi", query)
+            return await AGENTIC_TOOLS_serpapi(query)
+        },
+    }),
+    bing: tool({
+        description: "Search the web using Bing",
+        parameters: z.object({
+            query: z.string().describe("The query to search for"),
+        }),
+        execute: async ({query}) => {
+            console.log("AGENTIC_TOOLS_bing", query)
+            return await AGENTIC_TOOLS_bing(query)
+        },
+    }),
+    calculator: tool({
+        description: "Calculate an expression",
+        parameters: z.object({
+            expression: z.string().describe("The expression to calculate"),
+        }),
+        execute: async ({expression}) => {
+            console.log("AGENTIC_TOOLS_calculator", expression)
+            return await AGENTIC_TOOLS_calculator(expression)
+        },
+    }),
+    tavily: tool({
+        description: "Search the web using Tavily",
+        parameters: z.object({
+            query: z.string().describe("The query to search for"),
+        }),
+        execute: async ({query}) => {
+            console.log("AGENTIC_TOOLS_tavily", query)
+            return await AGENTIC_TOOLS_tavily(query)
+        },
+    }),
+    jina_search: tool({
+        description: "Search the web using Jina",
+        parameters: z.object({
+            query: z.string().describe("The query to search for"),
+        }),
+        execute: async ({query}) => {
+            console.log("AGENTIC_TOOLS_jina_search", query)
+            return await AGENTIC_TOOLS_jina_search(query)
+        },
+    }),
+    jina_readUrl: tool({
+        description: "Read a URL using Jina",
+        parameters: z.object({
+            url: z.string().describe("The URL to read"),
+        }),
+        execute: async ({url}) => {
+            console.log("AGENTIC_TOOLS_jina_readUrl", url)
+            return await AGENTIC_TOOLS_jina_readUrl(url)
+        },
+    }),
+    novu: tool({
+        description: "Send a notification using Novu",
+        parameters: z.object({
+            name: z.string().describe("The name of the event to trigger"),
+            payload: z.any().describe("The payload to send with the event"),
+            to: z.any().describe("The recipient of the notification"),
+        }),
+        execute: async ({name, payload, to}) => {
+            console.log("AGENTIC_TOOLS_novu", name, payload, to)
+            return await AGENTIC_TOOLS_novu(name, payload, to)
+        },
+    }),
+    firecrawl: tool({
+        description: "Scrape data from an URL",
+        parameters: z.object({
+            url: z.string().describe("The URL to scrape"),
+        }),
+        execute: async ({url}) => {
+            console.log("AGENTIC_TOOLS_firecrawl", url)
+            return await AGENTIC_TOOLS_firecrawl(url)
+        },
+    }),
+    exa: tool({
+        description: "Web search tailored for LLMs",
+        parameters: z.object({
+            query: z.string().describe("The query to search for"),
+        }),
+        execute: async ({query}) => {
+            console.log("AGENTIC_TOOLS_exa", query)
+            return await AGENTIC_TOOLS_exa(query)
+        },
+    }),
+}
+
+export const AGENTIC_TOOLS_serpapi = async (query: string) => {
+    const serpapi = new SerpAPIClient()
+    return await serpapi.search(query)
+}
+
+export const AGENTIC_TOOLS_bing = async (query: string) => {
+    const bing = new BingClient()
+    return await bing.search(query)
+}
+
+export const AGENTIC_TOOLS_calculator = async (expression: string) => {
+   
+    return await calculator({role: 'user', content: expression })
+}
+
+export const AGENTIC_TOOLS_tavily = async (query: string) => {
+    const tavily = new TavilyClient()
+    return await tavily.search(query).then((data) => {
+        return data.results?.map((result) => result.content).join('\n')
+    })
+}
+
+export const AGENTIC_TOOLS_jina_search = async (query: string) => {
+    const jina = new JinaClient()
+    return await jina.search(query)
+}
+
+export const AGENTIC_TOOLS_jina_readUrl = async (url: string) => {
+    const jina = new JinaClient()
+    return await jina.readUrl({url})
+}
+// export const AGENTIC_TOOLS_socialData = async (query: string) => {
+//     const socialData = new SocialDataClient()
+//     return await socialData.getFollowersForUserId(query)
+// }
+
+export const AGENTIC_TOOLS_novu = async (name: string, payload: any, to: any) => {
+    const novu = new NovuClient()
+    return await novu.triggerEvent({name, payload, to})
+}
+
+export const AGENTIC_TOOLS_firecrawl = async (url: string) => {
+    const firecrawl = new FirecrawlClient()
+    return await firecrawl.scrapeUrl({url}).then((data) => {
+        return data.data?.content
+    })
+}
+
+export const AGENTIC_TOOLS_exa = async (query: string) => {
+    const exa = new ExaClient()
+    return await exa.search(query)
+}
+
+

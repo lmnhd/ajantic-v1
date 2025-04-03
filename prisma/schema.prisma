@@ -1,0 +1,253 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  directUrl    = env("DIRECT_URL")
+  relationMode = "prisma"
+}
+
+model User {
+  id                      Int                    @id @default(autoincrement())
+  clerkId                 String                 @unique
+  email                   String                 @unique
+  profileImage            String?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  credits                 String?                @default("10")
+  googleResourceId        String?                @unique
+  localGoogleId           String?                @unique
+  tier                    String?                @default("Free")
+  usecount                Int                    @default(0)
+  stripeCheckoutSessionId String?
+  stripeCustomerId        String?
+  subscriptionStart       DateTime?
+  subscriptionValid       Boolean                @default(false)
+  lastUse                 DateTime?
+  phone                   String?
+  fName                   String?
+  lName                   String?
+  LocalGoogleCredential   LocalGoogleCredential?
+}
+
+model LocalGoogleCredential {
+  id          String   @id @default(uuid())
+  accessToken String   @unique
+  folderId    String?
+  pageToken   String?
+  channelId   String   @unique @default(uuid())
+  subscribed  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model FormattedLyrics {
+  id        Int      @id @default(autoincrement())
+  artist    String
+  title     String
+  summary   String
+  lyrics    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  img       String?
+}
+
+model SummaryTemplates {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+  type String
+}
+
+model AILyrics {
+  id           Int      @id @default(autoincrement())
+  userId       String
+  artist       String
+  title        String
+  lyrics       String
+  inspirations String[]
+  blockarized  String?
+}
+
+model Wordplay {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String
+  example     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ResearchSong {
+  id        Int      @id @default(autoincrement())
+  artist    String
+  title     String
+  lyrics    String
+  chorus    String
+  summary   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  wordplays Int[]
+  img       String?
+}
+
+model SongSets {
+  id        Int      @id @default(autoincrement())
+  name      String
+  songs     Int[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SongHistory {
+  id           Int      @id @default(autoincrement())
+  songId       Int
+  userId       String
+  content      String
+  songName     String
+  history      String
+  rules        String[]
+  currentLine  String
+  currentBlock String
+  currentSong  String
+  curBlockNum  Int
+  curLineNum   Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+}
+
+model GeneralPurpose {
+  id        Int      @id @default(autoincrement())
+  name      String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  meta1     String
+  meta2     String
+  meta3     String
+}
+
+model AppFreeze {
+  id                   Int      @id @default(autoincrement())
+  name                 String
+  userId               String
+  localState           String
+  currentConversation  String   @default("[]")
+  serverMessages       String   @default("[]")
+  orchestrationState   String   @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @default(now()) @updatedAt
+}
+
+model ServerMessage {
+  id                Int      @id @default(autoincrement())
+  role              String
+  content           String
+  subMessages       String
+  currentState      String
+  agentName         String
+  contextSets          String
+  conversationLevel Int
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now()) @updatedAt
+}
+
+model Conversation {
+  id        Int      @id @default(autoincrement())
+  dayName   String
+  userId    String
+  messages  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model LastConversationDayName {
+  id        Int      @id @default(autoincrement())
+  dayName   String
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model Team {
+  id         Int              @id @default(autoincrement())
+  name       String
+  objectives String
+  userId     String
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @default(now()) @updatedAt
+  agents     AgentComponent[]
+  lineSets   LineSet[]
+  context    ContextSet?
+}
+
+model LineSet {
+  id        Int      @id @default(autoincrement())
+  setName   String
+  text      String
+  lines     String
+  teamId    Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  team      Team?    @relation(fields: [teamId], references: [id])
+
+  @@index([teamId])
+}
+
+model ContextContainerProps {
+  id          Int         @id @default(autoincrement())
+  userId      String      @default(uuid())
+  setName     String
+  text        String
+  lines       String
+  teamId      Int?
+  fullScreen  Boolean     @default(false)
+  hiddenFromAgents String[]
+  isDisabled  Boolean @default(false)
+  formSchema  String?
+  contextSet  ContextSet? @relation("ContextSetToProps", fields: [contextSetId], references: [id])
+  contextSetId Int?
+
+  @@index([contextSetId])
+}
+
+model ContextSet {
+  id        Int                      @id @default(autoincrement())
+  userId    String                   @default(uuid())
+  teamName  String
+  sets      ContextContainerProps[]  @relation("ContextSetToProps")
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @default(now()) @updatedAt
+  teamId    Int?                    @unique
+  team      Team?                    @relation(fields: [teamId], references: [id])
+  @@index([teamId])
+}
+
+model AgentComponent {
+  id               Int      @id @default(autoincrement())
+  type             String
+  name             String
+  roleDescription  String
+  title            String
+  systemPrompt     String?
+  modelProvider    String
+  modelName        String
+  temperature      Float    @default(0)
+  tools            String[]
+  voice            Json?
+  promptDirectives String[]
+  disabled         Boolean  @default(false)
+  training         Boolean  @default(false)
+  teamId           Int?
+  userId           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+  team             Team?    @relation(fields: [teamId], references: [id])
+
+  @@unique([teamId, name])
+  @@index([teamId])
+}
