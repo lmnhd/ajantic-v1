@@ -518,6 +518,8 @@ export type ModelArgs = {
   provider: ModelProviderEnum;
   modelName: string | ModelNames;
   temperature: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
 };
 
 export type ModelProvider = {

@@ -317,7 +317,7 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
     customAgentSet: string[] = []
   ) => {
     const _allAgents = get().localState.currentAgents.agents;
-    const _customAgentSet = get().customAgentSet;
+    const _customAgentSet = customAgentSet.length > 0 ? customAgentSet : get().customAgentSet;
     // make sure all names in cusomset are actually available in all agents
     const _validCustomAgentSet = _customAgentSet.filter((agentName) => _allAgents.some((agent) => agent.name === agentName));
     //await get().saveState();

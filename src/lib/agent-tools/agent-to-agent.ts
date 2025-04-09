@@ -177,3 +177,57 @@ export const AGENT_TOOLS_agentToAgent_v2 = async (
     })
   }
 }
+export type SubConversationProps = {
+  response: string;
+  state: AISessionState;
+  history: ServerMessage[];
+}
+export interface AgentToAgentChatProps {
+  availableAgents: string[];
+  conversationLevel: number;
+  agentFoundationalPromptProps: AgentFoundationalPromptProps;
+  messageHistory: ServerMessage[];
+  state: AISessionState;
+  userId: string;
+  teamName: string;
+  vc: MemoryVectorStore;
+  contextSets: ContextContainerProps[];
+  convoTwo: SubConversationProps;
+  convoThree: SubConversationProps;
+}
+export const AGENT_TOOLS_agentToAgent_v3 = async (  props: AgentToAgentChatProps) => {
+  return {
+    agentChat: tool({
+      description: `communicate with allowed agents. Choose the agent from the list of available agents.`,
+      parameters: z.object({
+        msgToAgentName: z.enum(['',...props.availableAgents]).describe("The recipient's name"),
+        msgFromAgentName: z.string().describe("Your name"), 
+        agentToAgentMsg: z.string().describe("The message"),
+      }),
+      execute: async ({ msgToAgentName, msgFromAgentName, agentToAgentMsg }) => {
+        if (!props.availableAgents.includes(msgToAgentName)) {
+          return `Invalid agent name. Please choose from the list of available agents: ${props.availableAgents.join(', ')}`;
+        }
+
+        const agentResponse = await agentToAgentChat(
+          props.conversationLevel,
+          msgToAgentName,
+          props.agentFoundationalPromptProps.agentType,
+          msgFromAgentName,
+          agentToAgentMsg,
+          props.messageHistory,
+          props.convoTwo,
+          props.convoThree,
+          props.state,
+          props.userId,
+          props.teamName,
+          props.vc,
+          props.contextSets,
+        []
+        );
+
+        return agentResponse;
+      }
+    })
+  }
+}

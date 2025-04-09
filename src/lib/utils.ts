@@ -2,7 +2,7 @@ import modelsData from "@/src/app/api/model/vercel_models.json";
 import { ModelProviderEnum, ModelArgs } from "./types";
 
 export function UTILS_getModelsJSON() {
-  const modelsData = require('@/src/app/api/model/vercel_models.json');
+ // const modelsData = require('@/src/app/api/model/vercel_models.json');
   return modelsData;
 }
 
@@ -69,7 +69,7 @@ import {
 } from "./agent-tools/pinecone";
 
 import { AGENT_TOOLS_EMULATOR_word } from "./agent-tools/word-tools";
-import { AGENT_TOOLS_EMULATOR_browserbase } from "./agent-tools/browserbase";
+
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 
 export function cn(...inputs: ClassValue[]) {

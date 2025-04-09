@@ -66,9 +66,11 @@ import {
 import {
   autoRedirectOrchestrator,
   autoRedirectOrchestrator2,
+  autoRedirectOrchestrator3,
   handleNextAutoAgent,
 } from "./orchestrated-chat/auto-agent-next";
 import { toast } from "@/components/ui/use-toast";
+import { ORCHESTRATION_autoModeRedirect } from "./orchestrated-chat/auto-redirect";
 
 export interface BasicAgentChatProps {
   message: string;
@@ -109,7 +111,9 @@ export async function handleOrchestratedChatSubmit(
   ),
   factCheck: boolean = false
 ) {
-  console.log("handleOrchestratedChatSubmit called");
+  console.log("handleOrchestratedChatSubmit starting with params:", {
+    chatMode, numRounds, maxRounds, order, customAgentSet
+  });
 
   try {
     // Initialize state and get required variables
@@ -238,6 +242,7 @@ export async function handleOrchestratedChatSubmit(
       props.currentCycleStep = 0;
 
       // Begin the cycle within a round
+      //****BEGIN OF CYCLE */
       while (
         (props.agentOrder !== "auto" &&
           props.currentCycleStep < currentAgents.length) ||
@@ -329,13 +334,17 @@ export async function handleOrchestratedChatSubmit(
             messageHistory: currentConversation,
             summarizeConversation: false,
           } as AutoOrchestrationProps;
-          const _autoResult = await autoRedirectOrchestrator2(props);
+          const _autoResult = await ORCHESTRATION_autoModeRedirect(props);
+
+          console.log("Client received from autoRedirectOrchestrator3:", JSON.stringify(_autoResult, null, 2));
+
           if (_autoResult.workflowComplete) {
             autoChatInProgress = false;
             props.currentCycleStep = currentAgents.length;
             // reset pause and cancel flags
             ORCHESTRATION_PAUSE_clearFlag();
             ORCHESTRATION_CANCEL_clearAllFlags();
+            set({ agentActive: false });
             return;
           } else {
             // currentAgent = _autoResult.nextAgent;
@@ -375,7 +384,10 @@ export async function handleOrchestratedChatSubmit(
                 agentGlobalChatInput: "Information requested...",
                 currentConversation,
                 agentActive: false,
-                contextSet: contextSet,
+                contextSet: {
+                  sets: _autoResult.newContext || contextSet.sets,
+                  teamName: teamName,
+                },
               });
 
               await storeConversation(currentConversation, userId);
@@ -385,6 +397,7 @@ export async function handleOrchestratedChatSubmit(
               // reset pause and cancel flags
               ORCHESTRATION_PAUSE_clearFlag();
               ORCHESTRATION_CANCEL_clearAllFlags();
+              
               return;
             }
 
@@ -494,7 +507,7 @@ export async function handleOrchestratedChatSubmit(
         contextSet.sets = agentTurnResult.contextSets;
         // Store the updated conversation
         set({
-          agentGlobalChatInput: agentTurnResult.agentResponse || "",
+          agentGlobalChatInput: "",
           currentConversation,
           contextSet: {
             sets: agentTurnResult.contextSets,
@@ -534,7 +547,8 @@ export async function handleOrchestratedChatSubmit(
           break;
         }
       }
-
+      console.log("!!!_END OF CYCLE !!!", props.currentRound);
+      //****END OF CYCLE */
       // Update context at end of round
       if (props.agentOrder !== "auto") {
         await updateContextFromConversation(
@@ -559,14 +573,8 @@ export async function handleOrchestratedChatSubmit(
       customAgentSet
     );
   } catch (error) {
-    console.error("Error in handleOrchestratedChatSubmit", error);
-    logger.error("Error in handleOrchestratedChatSubmit", {
-      error: error,
-    });
-
-    set({ agentActive: false });
-    ORCHESTRATION_PAUSE_resetAllFlags();
-    ORCHESTRATION_CANCEL_clearAllFlags();
+    console.error("Error in handleOrchestratedChatSubmit:", error);
+    throw error; // Re-throw to preserve the original error
   }
 }
 

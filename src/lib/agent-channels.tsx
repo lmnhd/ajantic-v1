@@ -55,6 +55,7 @@ import { AGENT_TOOLS_contextSets } from "@/src/lib/agent-tools/context-sets";
 import {
   AGENT_TOOLS_agentToAgent,
   AGENT_TOOLS_agentToAgent_v2,
+  SubConversationProps,
 } from "./agent-tools/agent-to-agent";
 import { AGENT_TOOLS_urlScrape } from "./agent-tools/agent-url-scrape";
 import { VectorStoreRetriever } from "@langchain/core/vectorstores";
@@ -1020,16 +1021,8 @@ export async function LOAD_TYPE_SPECIFIC_TOOLS(
   type: AgentTypeEnum,
   tools: any,
   contextSets: ContextContainerProps[],
-  convoTwo: {
-    response: string;
-    state: AISessionState;
-    history: ServerMessage[];
-  },
-  convoThree: {
-    response: string;
-    state: AISessionState;
-    history: ServerMessage[];
-  },
+  convoTwo: SubConversationProps,
+  convoThree: SubConversationProps,
   agentFoundationalPromptProps: AgentFoundationalPromptProps,
   state: AISessionState,
 

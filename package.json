@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "dev-wp": "next dev",
     "dev": "next dev --turbopack",
+    "dev:debug:win": "set NODE_OPTIONS=--inspect && next dev",
+    "dev:debug:unix": "NODE_OPTIONS=--inspect next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --config eslint.config.mjs"
@@ -172,6 +175,7 @@
     "@typescript-eslint/parser": "^8.18.2",
     "@vercel/style-guide": "^6.0.0",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^7.0.3",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.16",
     "eslint-plugin-import": "^2.31.0",

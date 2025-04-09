@@ -515,24 +515,38 @@ export default function AgentChat2({
                           <PopoverContent className="w-60 bg-gray-800 border-gray-700 p-2">
                               <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
                                   <p className="text-xs text-gray-400 mb-1">Select agents for orchestration:</p>
-                                  {allAgents
-                                    .filter(agent => !agent.disabled && agent.type !== "manager")
-                                    .map((agent) => (
+                                  {(() => {
+                                    // Agents selected and ordered by customAgentSet
+                                    const selectedAgents = customAgentSet
+                                      .map(name => allAgents.find(agent => agent.name === name && !agent.disabled && agent.type !== "manager"))
+                                      .filter(agent => agent !== undefined) as AgentComponentProps[]; // Type assertion
+
+                                    // Agents available but not selected
+                                    const unselectedAgents = allAgents.filter(
+                                      agent => !agent.disabled && agent.type !== "manager" && !customAgentSet.includes(agent.name)
+                                    );
+
+                                    // Combine the lists: selected first, then unselected
+                                    const orderedAgents = [...selectedAgents, ...unselectedAgents];
+
+                                    return orderedAgents.map((agent) => {
+                                        const isSelected = customAgentSet.includes(agent.name);
+                                        return (
                                       <div
                                         key={agent.name}
-                                        draggable={customAgentSet.includes(agent.name)}
+                                                draggable={isSelected}
                                         className={cn(
                                           "flex items-center gap-2 p-1 rounded cursor-pointer text-xs",
                                           "hover:bg-gray-700/50 transition-colors",
-                                          customAgentSet.includes(agent.name) ? "text-green-400 cursor-move" : "text-gray-300",
+                                                isSelected ? "text-green-400 cursor-move" : "text-gray-300",
                                         )}
                                         onClick={() => setOrRemoveCustomAgent(agent.name)}
-                                        onDragStart={(e) => { if (customAgentSet.includes(agent.name)) { e.dataTransfer.setData("agent", agent.name); e.currentTarget.classList.add('opacity-50'); } else { e.preventDefault(); }}}
+                                                onDragStart={(e) => { if (isSelected) { e.dataTransfer.setData("agent", agent.name); e.currentTarget.classList.add('opacity-50'); } else { e.preventDefault(); }}}
                                         onDragEnd={(e) => e.currentTarget.classList.remove('opacity-50')}
-                                        onDragOver={(e) => { if (customAgentSet.includes(agent.name)) { e.preventDefault(); e.currentTarget.classList.add('bg-gray-700/30'); }}}
+                                                onDragOver={(e) => { if (isSelected) { e.preventDefault(); e.currentTarget.classList.add('bg-gray-700/30'); }}}
                                         onDragLeave={(e) => e.currentTarget.classList.remove('bg-gray-700/30')}
                                         onDrop={(e) => {
-                                          if (!customAgentSet.includes(agent.name)) return;
+                                                    if (!isSelected) return; // Can only drop onto selected items
                                           e.preventDefault();
                                           e.currentTarget.classList.remove('bg-gray-700/30');
                                           const draggedAgent = e.dataTransfer.getData("agent");
@@ -541,11 +555,14 @@ export default function AgentChat2({
                                           }
                                         }}
                                       >
-                                        <DragHandleDots2Icon className="w-3 h-3 flex-shrink-0" />
+                                                {isSelected && <DragHandleDots2Icon className="w-3 h-3 flex-shrink-0" />}
+                                                {!isSelected && <div className="w-3 h-3 flex-shrink-0"></div>} {/* Placeholder for alignment */}
                                         <span className="flex-grow truncate">{agent.name}</span>
-                                        <Checkbox checked={customAgentSet.includes(agent.name)} className="w-3 h-3 flex-shrink-0" />
+                                                <Checkbox checked={isSelected} className="w-3 h-3 flex-shrink-0" />
                                       </div>
-                                    ))}
+                                        );
+                                    });
+                                  })()}
                               </div>
                           </PopoverContent>
                        </Popover>
@@ -566,8 +583,8 @@ export default function AgentChat2({
                 className="flex-grow p-2 text-sm bg-transparent focus:outline-none placeholder-gray-500 resize-none"
                 placeholder={orchestrationMode === 'agent-orchestrator' ? (index >=0 ? `Message ${allAgents[index].name}...` : "Select an agent") : "Enter initial message for orchestration..."}
                 name="message"
-                value={state.input} // Controlled component
-                onChange={(e) => {
+                defaultValue={state.input} // Controlled component
+                onBlur={(e) => {
                   dispatch({ type: "SET_INPUT", payload: e.target.value });
                   setExternalInput?.(e.target.value);
                   inputChanged(e.target.value); // Ensure parent knows about changes
