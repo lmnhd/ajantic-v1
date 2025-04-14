@@ -1,6 +1,5 @@
-
 import { AgentTypeEnum } from "../../types";
-import { OrchestrationType2 } from "../types";
+import { OrchestrationType2 } from "../types/base";
 import { OrchestrationPromptContext } from "../types/prompt";
 import { ORCHESTRATION_PROMPTS } from "./orchestration-prompt";
 
@@ -19,7 +18,7 @@ export const ORCHESTRATION_PROMPT_SELECT = async (prompt_context:OrchestrationPr
             break;
         case OrchestrationType2.MANAGER_DIRECTED_WORKFLOW:
             if (currentAgent.type === AgentTypeEnum.MANAGER) {
-                prompt = await ORCHESTRATION_PROMPTS.autoManager_prompt(prompt_context, currentContextSets, queryForSemanticSearch);
+                prompt = await ORCHESTRATION_PROMPTS.managerDirected_prompt(prompt_context, currentContextSets, queryForSemanticSearch);
             } else {
                 prompt = await ORCHESTRATION_PROMPTS.autoProcess_prompt(prompt_context, currentContextSets, queryForSemanticSearch);
             }

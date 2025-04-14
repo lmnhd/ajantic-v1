@@ -11,6 +11,8 @@
 
 // Use the 'ORCHESTRATION_runLLMRoutedWorkflow' workflow function for reference on how to structure the process and code.
 
+import { AGENT_FORM_creator } from "../../post-message-analysis/agent-request-form-creator";
+import { UTILS_TEAMS_infoRequestContextFormSet } from "../../teams/lib/teams-utils";
 import {
     AgentTurnInput,
     AgentTurnResult,
@@ -29,17 +31,30 @@ import {
 } from "../utils";
 import { logger } from "@/src/lib/logger";
 import { AISessionState, AgentComponentProps, AgentTypeEnum, ContextContainerProps, ServerMessage } from "@/src/lib/types";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
 
 // --- Interfaces --- //
 
 // Interface for the result of parsing the manager's decision
 interface ManagerDirectiveResult {
-    nextAgentName: string; // Agent explicitly called, or manager by default
-    messageForNextAgent: string; // The message content intended for the next step
-    redirectToUser: boolean; // Did the manager explicitly say "Message to user:"?
+    messageTo: string; // Either "user" or agent name to direct message to
+    message: string; // The message content
     workflowComplete: boolean; // Did the manager indicate completion with no further tasks?
     contextUpdates: boolean; // Did the manager indicate context updates?
+    isInfoRequest: boolean; // Did the manager indicate an info request?
+    contextSetUpdate?: {
+        contextSets: Array<{
+            newOrUpdate: "new" | "update";
+            name: string;
+            context: string;
+            visibleToAgents?: "none" | "all" | string[];
+        }>;
+    }; // Context sets to create or update
+    expectedOutput?: { // Extract expected output criteria from text
+        criteria: string;
+        format?: string;
+        requiredElements?: string[];
+        validationStrategy?: "exact" | "semantic" | "contains" | "custom" | "simple";
+    };
 }
 
 // --- Helper Functions --- //
@@ -52,19 +67,12 @@ function _parseManagerResponse(
 ): ManagerDirectiveResult {
     logger.log("Parsing manager response for directives...");
     
-    let nextAgentName = managerAgentName; // Default back to manager
-    let messageForNextAgent = managerResponse; // Default is the full response
-    let redirectToUser = false;
+    let messageTo = managerAgentName; // Default back to manager
+    let message = managerResponse; // Default is the full response
     let workflowComplete = false;
     let contextUpdates = false;
-
-    // Check for message to user
-    const userRedirectMatch = managerResponse.match(/Message to user:(.*?)(\n|$)/i);
-    if (userRedirectMatch) {
-        redirectToUser = true;
-        messageForNextAgent = userRedirectMatch[1].trim();
-        logger.log(`Manager directed message to user.`);
-    }
+    let expectedOutput: ManagerDirectiveResult['expectedOutput'] = undefined;
+    let isInfoRequest = false;
 
     // Check for workflow completion
     if (/workflow complete|task complete|all done/i.test(managerResponse)) {
@@ -78,13 +86,65 @@ function _parseManagerResponse(
         logger.log("Manager response indicates context updates.");
     }
 
-    // Check for agent mentions if not redirecting to user
-    if (!redirectToUser && !workflowComplete) {
+    // Check for info request
+    if (/Information request:/i.test(managerResponse)) {
+        isInfoRequest = true;
+        logger.log("Manager response indicates an info request.");
+    }
+
+    // Check for expected output criteria
+    // Using a simpler regex approach to avoid needing flags
+    const expectedOutputSections = managerResponse.split(/Expected output:/i);
+    if (expectedOutputSections.length > 1) {
+        const criteriaText = expectedOutputSections[1].split(/\n\n/)[0].trim();
+        
+        // Initialize expected output object
+        expectedOutput = {
+            criteria: criteriaText
+        };
+
+        // Try to extract format if specified
+        const formatSections = criteriaText.split(/format:/i);
+        if (formatSections.length > 1) {
+            const formatText = formatSections[1].split(/\n/)[0].trim();
+            expectedOutput.format = formatText;
+        }
+
+        // Try to extract required elements if specified
+        const elementsSections = criteriaText.split(/required elements:/i);
+        if (elementsSections.length > 1) {
+            const elementsText = elementsSections[1].split(/\n\n/)[0].trim();
+            expectedOutput.requiredElements = elementsText.split(/[,;]/).map(item => item.trim());
+        }
+
+        // Try to extract validation strategy if specified
+        const validationMatch = criteriaText.match(/validation:\s*(exact|semantic|contains|custom|simple)/i);
+        if (validationMatch) {
+            expectedOutput.validationStrategy = validationMatch[1].toLowerCase() as "exact" | "semantic" | "contains" | "custom" | "simple";
+        }
+
+        logger.log("Extracted expected output criteria from manager text response.");
+    }
+
+    // Check for message to user
+    if (managerResponse.includes("Message to user:")) {
+        messageTo = "user";
+        logger.log("Manager directed message to user.");
+        
+        // Extract the message for the user
+        const messageToUserPattern = /Message to user:([\s\S]*?)($|(?=\n\n))/;
+        const messageToUserMatch = managerResponse.match(messageToUserPattern);
+        if (messageToUserMatch && messageToUserMatch[1]) {
+            message = messageToUserMatch[1].trim();
+        }
+    }
+    // Check for agent mentions if not messaging user
+    else {
         for (const agent of allAgents) {
             // Regex to find @AgentName followed by space, comma, colon, or newline
             const mentionPattern = new RegExp(`@${agent.name}[\\s\\,\\:]`, 'i'); 
             if (mentionPattern.test(managerResponse)) {
-                nextAgentName = agent.name;
+                messageTo = agent.name;
                 
                 // Extract the message for the agent
                 const lines = managerResponse.split('\n');
@@ -96,14 +156,14 @@ function _parseManagerResponse(
                         const afterMention = line.substring(mentionIndex + nameLength).trim();
                         
                         // Remove punctuation at the beginning if any
-                        messageForNextAgent = afterMention.replace(/^[\s\,\:]+/, '').trim();
+                        message = afterMention.replace(/^[\s\,\:]+/, '').trim();
                         
                         // If there are more lines after this one, include them
                         const lineIndex = lines.indexOf(line);
                         if (lineIndex < lines.length - 1) {
                             const remainingLines = lines.slice(lineIndex + 1).join('\n').trim();
                             if (remainingLines) {
-                                messageForNextAgent += '\n\n' + remainingLines;
+                                message += '\n\n' + remainingLines;
                             }
                         }
                         
@@ -118,11 +178,12 @@ function _parseManagerResponse(
     }
 
     return {
-        nextAgentName,
-        messageForNextAgent,
-        redirectToUser,
+        messageTo,
+        message,
         workflowComplete,
-        contextUpdates
+        contextUpdates,
+        expectedOutput,
+        isInfoRequest
     };
 }
 
@@ -141,6 +202,15 @@ function formatFinalResult(state: OrchestrationState): OrchestrationFinalResult 
     };
 }
 
+export async function ORCHESTRATION_infoRequestToContextFormSet(currentMessage: string, contextSets: ContextContainerProps[], currentAgent: AgentComponentProps, messageHistory: ServerMessage[]) {
+    const formSchema = await AGENT_FORM_creator(currentMessage);
+      //result.newContext.push(UTILS_TEAMS_infoRequestContextFormSet(formSchema, [], props.currentAgent ?? {}, props.autoProps?.messageHistory ?? [], false));
+      const tempCTX = [...contextSets, UTILS_TEAMS_infoRequestContextFormSet(formSchema, [], currentAgent ?? {},messageHistory ?? [], false)]
+
+      return tempCTX
+
+}
+
 // --- Main Workflow Function --- //
 
 /**
@@ -149,7 +219,7 @@ function formatFinalResult(state: OrchestrationState): OrchestrationFinalResult 
 export async function ORCHESTRATION_runManagerDirectedWorkflow(
     initialState: OrchestrationState,
     sessionState: AISessionState,
-    memStore: MemoryVectorStore
+    
 ): Promise<OrchestrationFinalResult> {
     let state = { ...initialState };
     state.status = "running";
@@ -234,9 +304,9 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
             // Use the appropriate execution function based on agent type
             let turnResult: AgentTurnResult;
             if (nextAgent.type === AgentTypeEnum.MANAGER) {
-                turnResult = await ORCHESTRATION_executeManagerTurn(turnInput, sessionState, state.config, memStore);
+                turnResult = await ORCHESTRATION_executeManagerTurn(turnInput, sessionState, state.config);
             } else {
-                turnResult = await ORCHESTRATION_executeAgentTurn(turnInput, sessionState, state.config, memStore);
+                turnResult = await ORCHESTRATION_executeAgentTurn(turnInput, sessionState, state.config);
             }
                 
             logger.log(`Agent ${turnResult.agentName} completed turn.`);
@@ -245,6 +315,8 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                 role: "assistant", 
                 content: turnResult.response, 
                 agentName: turnResult.agentName,
+                agentDirectives: turnResult.agentDirectives,
+                expectedOutput: turnResult.agentDirectives?.expectedOutput
             };
             state.conversationHistory = [...state.conversationHistory, agentResponseMessage];
 
@@ -271,25 +343,67 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                         break; // Exit loop
                     }
                     
-                    if (turnResult.agentDirectives.redirectToUser) {
-                        logger.log("Manager directed to user via structured output.");
+                    const messageTo = turnResult.agentDirectives?.messageTo || "";
+                    if (messageTo === "user") {
+                        logger.log("Manager directed message to user via structured output.");
                         state.status = "awaiting_user";
+                        
+                        // If this is an info request, process the form
+                        if (turnResult.agentDirectives.isInfoRequest) {
+                            logger.log("Processing information request form from structured output.");
+                            
+                            // The context updates are already processed in agent-execution.ts
+                            if (turnResult.allContextSets) {
+                                // Use the processed context sets directly
+                                state.contextSets = turnResult.allContextSets;
+                                logger.log(`Using pre-processed context sets with ${turnResult.allContextSets.length} items`);
+                                
+                                // Update the agent response to include form prompt if not already added
+                                if (agentResponseMessage && !agentResponseMessage.content.includes("Please fill out the form")) {
+                                    agentResponseMessage.content += "\n\n**Please fill out the form below to provide the requested information.**";
+                                    
+                                    // Update the message in the conversation history
+                                    const lastIndex = state.conversationHistory.length - 1;
+                                    if (lastIndex >= 0) {
+                                        state.conversationHistory[lastIndex] = agentResponseMessage;
+                                    }
+                                }
+                            }
+                            
+                            break; // Exit loop
+                        }
+                        
+                        // Check if the manager's turn result included context updates
+                        if (turnResult.contextModified) {
+                            logger.log("Manager provided context updates.");
+                            
+                            // Use the pre-processed context sets
+                            if (turnResult.allContextSets) {
+                                logger.log(`Using pre-processed context sets with ${turnResult.allContextSets.length} items`);
+                                state.contextSets = turnResult.allContextSets;
+                                
+                                // Include the context set in the message for UI display
+                                if (agentResponseMessage && turnResult.contextSet) {
+                                    agentResponseMessage.contextSet = turnResult.contextSet;
+                                }
+                            }
+                        }
+                        
                         break; // Exit loop
                     }
                     
-                    const directedAgentName = turnResult.agentDirectives?.nextAgentName || "";
-                    const selectedAgent = agents.find(a => a.name === directedAgentName);
+                    const selectedAgent = agents.find(a => a.name === messageTo);
                     if (!selectedAgent) {
-                        logger.warn(`Manager directed to invalid agent '${directedAgentName}' via structured output, defaulting to manager.`);
+                        logger.warn(`Manager directed to invalid agent '${messageTo}' via structured output, defaulting to manager.`);
                         nextAgent = managerAgent;
-                        messageForNextAgent = `Could not find agent ${directedAgentName}. Please clarify direction.`;
+                        messageForNextAgent = `Could not find agent ${messageTo}. Please clarify direction.`;
                     } else {
                         nextAgent = selectedAgent;
-                        messageForNextAgent = turnResult.agentDirectives?.messageForNextAgent || "";
+                        messageForNextAgent = turnResult.agentDirectives?.message || "";
                     }
                     
                     // Check if the manager's turn result included context updates
-                    if (turnResult.contextModified) {
+                    if (turnResult.contextModified || turnResult.agentDirectives.contextSetUpdate) {
                         logger.log("Manager provided context updates.");
                         
                         // If the agent returned the complete set of context sets, use that
@@ -297,8 +411,134 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                             logger.log(`Using complete context set with ${turnResult.allContextSets.length} items from agent result`);
                             state.contextSets = turnResult.allContextSets;
                         } else {
-                            // Otherwise apply changes incrementally
+                            // Process contextSetUpdate if provided
+                            if (turnResult.agentDirectives.contextSetUpdate) {
+                                const updates = turnResult.agentDirectives.contextSetUpdate.contextSets;
+                                logger.log(`Processing ${updates.length} context set updates from directives`);
+                                
+                                for (const update of updates) {
+                                    if (update.newOrUpdate === "new") {
+                                        // Add new context set
+                                        // Convert visibleToAgents to hiddenFromAgents
+                                        let hiddenFromAgents: string[] = [];
+                                        const visibleTo = (update as any).visibleToAgents || "all";
+                                        
+                                        if (visibleTo === "none") {
+                                            // If visible to none, hide from all agents
+                                            hiddenFromAgents = agents.map(agent => agent.name);
+                                        } else if (visibleTo === "all") {
+                                            // If visible to all, hide from none
+                                            hiddenFromAgents = [];
+                                        } else {
+                                            // If specific agents are visible, hide from all others
+                                            if (Array.isArray(visibleTo)) {
+                                                // Handle array of visible agents
+                                                hiddenFromAgents = agents
+                                                    .filter(agent => !visibleTo.includes(agent.name))
+                                                    .map(agent => agent.name);
+                                            } else {
+                                                // Handle single visible agent (backward compatibility)
+                                                hiddenFromAgents = agents
+                                                    .filter(agent => agent.name !== visibleTo)
+                                                    .map(agent => agent.name);
+                                            }
+                                        }
+                                        
+                                        state.contextSets.push({
+                                            setName: update.name,
+                                            text: update.context,
+                                            lines: [],
+                                            isDisabled: false,
+                                            hiddenFromAgents: hiddenFromAgents
+                                        });
+                                        logger.log(`Added new context set "${update.name}" visible to ${visibleTo}`);
+                                    } else if (update.newOrUpdate === "update") {
+                                        // Update existing context set
+                                        const index = state.contextSets.findIndex(cs => cs.setName === update.name);
+                                        if (index >= 0) {
+                                            if (update.context === "") {
+                                                // Remove the context set if empty string provided
+                                                state.contextSets.splice(index, 1);
+                                                logger.log(`Removed context set "${update.name}" (empty context provided)`);
+                                            } else {
+                                                // Convert visibleToAgents to hiddenFromAgents
+                                                let hiddenFromAgents: string[] = state.contextSets[index].hiddenFromAgents || [];
+                                                const visibleTo = (update as any).visibleToAgents;
+                                                
+                                                if (visibleTo) {
+                                                    if (visibleTo === "none") {
+                                                        // If visible to none, hide from all agents
+                                                        hiddenFromAgents = agents.map(agent => agent.name);
+                                                    } else if (visibleTo === "all") {
+                                                        // If visible to all, hide from none
+                                                        hiddenFromAgents = [];
+                                                    } else {
+                                                        // If specific agents are visible, hide from all others
+                                                        if (Array.isArray(visibleTo)) {
+                                                            // Handle array of visible agents
+                                                            hiddenFromAgents = agents
+                                                                .filter(agent => !visibleTo.includes(agent.name))
+                                                                .map(agent => agent.name);
+                                                        } else {
+                                                            // Handle single visible agent (backward compatibility)
+                                                            hiddenFromAgents = agents
+                                                                .filter(agent => agent.name !== visibleTo)
+                                                                .map(agent => agent.name);
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                // Update with new content
+                                                state.contextSets[index] = {
+                                                    ...state.contextSets[index],
+                                                    text: update.context,
+                                                    hiddenFromAgents: hiddenFromAgents
+                                                };
+                                                logger.log(`Updated context set "${update.name}" visible to ${visibleTo || "unchanged"}`);
+                                            }
+                                        } else {
+                                            // Context set doesn't exist
+                                            if (update.context === "") {
+                                                // Convert visibleToAgents to hiddenFromAgents
+                                                let hiddenFromAgents: string[] = [];
+                                                const visibleTo = (update as any).visibleToAgents || "all";
+                                                
+                                                if (visibleTo === "none") {
+                                                    // If visible to none, hide from all agents
+                                                    hiddenFromAgents = agents.map(agent => agent.name);
+                                                } else if (visibleTo !== "all") {
+                                                    // If specific agents are visible, hide from all others
+                                                    if (Array.isArray(visibleTo)) {
+                                                        // Handle array of visible agents
+                                                        hiddenFromAgents = agents
+                                                            .filter(agent => !visibleTo.includes(agent.name))
+                                                            .map(agent => agent.name);
+                                                    } else {
+                                                        // Handle single visible agent (backward compatibility)
+                                                        hiddenFromAgents = agents
+                                                            .filter(agent => agent.name !== visibleTo)
+                                                            .map(agent => agent.name);
+                                                    }
+                                                }
+                                                
+                                                // Create empty context set if trying to update non-existent set with empty string
+                                                state.contextSets.push({
+                                                    setName: update.name,
+                                                    text: "",
+                                                    lines: [],
+                                                    isDisabled: false,
+                                                    hiddenFromAgents: hiddenFromAgents
+                                                });
+                                                logger.log(`Created empty context set "${update.name}" visible to ${visibleTo}`);
+                                            } else {
+                                                logger.warn(`Couldn't find context set "${update.name}" to update`);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             
+                            // Otherwise apply changes incrementally from the result
                             // Handle new context sets
                             if (turnResult.updatedContextSets && turnResult.updatedContextSets.length > 0) {
                                 logger.log(`Adding ${turnResult.updatedContextSets.length} new context sets`);
@@ -343,34 +583,108 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                     const directive = _parseManagerResponse(turnResult.response, managerAgent.name, agents);
                     logger.log("Parsed Manager Directive from text:", { directive });
 
+                    // Create directives object from the parsed text directive and add it to the response message
+                    if (agentResponseMessage) {
+                        // Add the parsed directives to the agent message
+                        agentResponseMessage.agentDirectives = {
+                            messageTo: directive.messageTo,
+                            message: directive.message,
+                            workflowComplete: directive.workflowComplete,
+                            contextUpdates: directive.contextUpdates,
+                            isInfoRequest: directive.isInfoRequest
+                        };
+                        
+                        // Add the expected output if it was parsed
+                        if (directive.expectedOutput) {
+                            agentResponseMessage.expectedOutput = directive.expectedOutput;
+                        }
+                        
+                        // Replace the message in the conversation history
+                        const lastIndex = state.conversationHistory.length - 1;
+                        if (lastIndex >= 0) {
+                            state.conversationHistory[lastIndex] = agentResponseMessage;
+                        }
+                    }
+
                     if (directive.workflowComplete) {
                         logger.log("Manager indicated workflow complete.");
                         state.status = "completed";
                         break; // Exit loop
                     }
 
-                    if (directive.redirectToUser) {
+                    if (directive.messageTo === "user") {
                         logger.log("Manager directed message to user.");
                         state.status = "awaiting_user";
+                        
+                        // If this is an info request, process the form
+                        if (directive.isInfoRequest) {
+                            logger.log("Processing information request form from text parsing.");
+                            
+                            // Create form-based context set for this info request
+                            const updatedContextSets = await ORCHESTRATION_infoRequestToContextFormSet(
+                                directive.message,
+                                state.contextSets,
+                                managerAgent,
+                                state.conversationHistory
+                            );
+                            
+                            // Update the state with the modified context sets
+                            state.contextSets = updatedContextSets;
+                            
+                            // Update the agent response to include form prompt
+                            if (agentResponseMessage) {
+                                agentResponseMessage.content += "\n\n**Please fill out the form below to provide the requested information.**";
+                                
+                                // Update the message in the conversation history
+                                const lastIndex = state.conversationHistory.length - 1;
+                                if (lastIndex >= 0) {
+                                    state.conversationHistory[lastIndex] = agentResponseMessage;
+                                }
+                            }
+                        }
+                        
                         break; // Exit loop
                     }
 
                     // Find the next agent based on parsed name
-                    const selectedAgent = agents.find(a => a.name === directive.nextAgentName);
+                    const selectedAgent = agents.find(a => a.name === directive.messageTo);
                     if (!selectedAgent) {
-                        logger.warn(`Manager directed to invalid agent '${directive.nextAgentName}', defaulting to manager.`);
+                        logger.warn(`Manager directed to invalid agent '${directive.messageTo}', defaulting to manager.`);
                         nextAgent = managerAgent;
-                        messageForNextAgent = `Could not find agent ${directive.nextAgentName}. Please clarify direction.`;
+                        messageForNextAgent = `Could not find agent ${directive.messageTo}. Please clarify direction.`;
                     } else {
                         nextAgent = selectedAgent;
-                        messageForNextAgent = directive.messageForNextAgent;
+                        messageForNextAgent = directive.message;
                     }
                 }
             } else {
                 // An agent other than the manager just ran. Route back to the manager.
                 logger.log(`Agent ${turnResult.agentName} finished, routing back to manager.`);
                 nextAgent = managerAgent;
-                messageForNextAgent = `Agent ${turnResult.agentName} response: ${turnResult.response}`;
+                
+                // Look for the original message from manager to this agent to check for expected output criteria
+                const originalManagerMessage = state.conversationHistory.find(msg => 
+                    msg.agentName === managerAgent.name && 
+                    msg.agentDirectives?.messageTo === turnResult.agentName &&
+                    msg.expectedOutput
+                );
+                
+                // Prepare the message back to the manager
+                if (originalManagerMessage?.expectedOutput) {
+                    // If the manager provided expected output criteria, include it for verification
+                    const criteria = JSON.stringify(originalManagerMessage.expectedOutput, null, 2);
+                    messageForNextAgent = `Agent ${turnResult.agentName} completed the task with the following response:\n\n${turnResult.response}\n\n---\nPlease verify this response against your expected output criteria:\n${criteria}`;
+                    
+                    logger.log(`Including expected output criteria for manager verification`);
+                } else {
+                    // Standard response without criteria
+                    messageForNextAgent = turnResult.response;
+                    
+                    // For cases where the agent response is very lengthy, add the agent name as context
+                    if (turnResult.response.length > 500) {
+                        messageForNextAgent = `Agent ${turnResult.agentName} provided a response: ${turnResult.response}`;
+                    }
+                }
             }
 
             state.currentRound++; // Increment round counter

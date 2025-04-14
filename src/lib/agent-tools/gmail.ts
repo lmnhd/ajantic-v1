@@ -26,6 +26,9 @@ export type GmailAgentTools = {
 // Export the function type
 export type GmailToolsFunction = (textChatLogs: TextChatLogProps[], userId:string) => GmailAgentTools;
 
+// Re-export the agent tools function from the implementation file
+export { AGENT_TOOLS_gmail } from './gmail/gmail';
+
 export const AGENT_TOOLS_DIRECTIVE_GMAIL = () => `
 <process-steps>
   <start-oauth-flow>

@@ -26,8 +26,9 @@ export type GoogleGenerativeAIProps = {
 
 export async function MODEL_google_generative_AI({modelName}:GoogleGenerativeAIProps){
     return google(modelName, {
+        useSearchGrounding: true,
         safetySettings: [
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_LOW_AND_ABOVE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_LOW_AND_ABOVE'},
         ],
       });
 }

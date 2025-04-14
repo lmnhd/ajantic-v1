@@ -26,6 +26,7 @@ import {
   Team,
   ContextContainerProps,
   ContextSet,
+  OrchestrationType,
 } from "@/src/lib/types";
 import { Message } from "ai";
 
@@ -70,6 +71,15 @@ import { fetchKnowledgeBaseEntries } from "@/src/app/api/kb-entries/[id]";
 import { useFullscreen } from "@/src/lib/useFullscreen";
 import Agent_comp from "./agent_comp";
 import { listElevenLabsVoices } from "@/src/lib/voices/voices-db";
+import {  OrchestrationType2 } from "@/src/lib/orchestration/types/base";
+import { mapOrchestrationTypes } from "@/src/lib/orchestration/adapter";
+
+// Define default orchestration settings using OrchestrationType2
+const defaultOrchestrationSettings = {
+  orchestrationMode: OrchestrationType2.DIRECT_AGENT_INTERACTION,
+  agentOrder: "sequential" as const,
+  customAgentSet: [] as string[],
+};
 
 export interface AutoPromptData {
   isDirective: boolean;
@@ -132,12 +142,7 @@ function ACFramework({
   setCurrentAgentIndex: (idx: number) => void;
   handlePromptTextToSet: (text: string) => void;
   handleDeleteTextFromSet?: (args: string) => void;
-  saveAgentState: () => // _agent: string,
-  // _lineSets: string,
-  // _index: number,
-  // saveOneOrAll: "one" | "all",
-  // _name?: string
-  void;
+  saveAgentState: () => void;
   stateLoaded: boolean;
   savedAgentStates: {
     agents: {
@@ -504,63 +509,155 @@ function ACFramework({
     }
   };
 
+  // EFFECT TO UPDATE AGENT DISABLED STATES BASED ON ORCHESTRATION
+  // useEffect(() => {
+  //   console.log(`\n[ACFramework Effect] Running effect for mode: ${localStateObject.orchestrationSettings?.orchestrationMode ?? 'default'}...`); // Log effect run WITH mode
+
+  //   const currentSettings = localStateObject.orchestrationSettings || defaultOrchestrationSettings;
+  //   const { orchestrationMode, agentOrder, customAgentSet } = currentSettings;
+  //   const isDirectMode = orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION;
+  //   const hasCustomSet = customAgentSet && customAgentSet.length > 0;
+
+  //   const updatedAgents = localStateObject.currentAgents.agents.map(agent => {
+  //     let calculatedDisabled = false; // Start assuming not disabled dynamically
+
+  //     if (!isDirectMode) {
+  //       const isSequentialType = [
+  //         OrchestrationType2.SEQUENTIAL_WORKFLOW,
+  //         OrchestrationType2.REVERSE_WORKFLOW,
+  //         OrchestrationType2.RANDOM_WORKFLOW
+  //       ].includes(orchestrationMode);
+
+  //       const isAdvancedType = [
+  //         OrchestrationType2.LLM_ROUTED_WORKFLOW,
+  //         OrchestrationType2.MANAGER_DIRECTED_WORKFLOW
+  //       ].includes(orchestrationMode);
+
+  //       const isManager = agent.type === AgentTypeEnum.MANAGER;
+  //       const isInCustomSet = hasCustomSet && customAgentSet.includes(agent.name);
+
+  //       if (isSequentialType) {
+  //         if (hasCustomSet) {
+  //           calculatedDisabled = isManager || !isInCustomSet;
+  //         } else {
+  //           calculatedDisabled = isManager;
+  //         }
+  //       } else if (isAdvancedType) {
+  //         if (hasCustomSet) {
+  //           calculatedDisabled = !isManager && !isInCustomSet;
+  //         }
+  //         // No custom set in advanced mode, remains false
+  //       }
+  //     }
+
+  //     // Overwrite agent's disabled status based purely on orchestration
+  //     // Note: This assumes orchestration dictates UI disabled state. 
+  //     // If explicit user disabling should persist, logic might need adjustment.
+  //     return {
+  //       ...agent,
+  //       disabled: calculatedDisabled 
+  //     };
+  //   });
+
+  //   // Only update state if the calculated disabled states actually differ
+  //   const currentDisabledStates = localStateObject.currentAgents.agents.map(a => a.disabled ?? false); // Ensure consistent comparison
+  //   const newDisabledStates = updatedAgents.map(a => a.disabled);
+  //   const agentsChanged = JSON.stringify(newDisabledStates) !== JSON.stringify(currentDisabledStates);
+
+  //   console.log(`[ACFramework Effect] Mode: ${orchestrationMode} | Current Disabled: ${JSON.stringify(currentDisabledStates)}`); // Log mode
+  //   console.log(`[ACFramework Effect] Mode: ${orchestrationMode} | New Calculated Disabled: ${JSON.stringify(newDisabledStates)}`); // Log mode
+  //   console.log(`[ACFramework Effect] Mode: ${orchestrationMode} | agentsChanged: ${agentsChanged}`); // Log mode
+
+  //   if (agentsChanged) {
+  //      console.log(`[ACFramework Effect] State change detected for mode ${orchestrationMode}, calling setlocalStateObject...`); // Log mode
+  //      setlocalStateObject({
+  //         ...localStateObject,
+  //         currentAgents: {
+  //           ...localStateObject.currentAgents,
+  //           agents: updatedAgents
+  //         }
+  //      });
+  //   }
+
+  // }, [
+  //     // Workaround: Depend on the whole object to catch mutations
+  //     localStateObject, 
+  //     setlocalStateObject 
+  // ]);
+
   const mapAgentsToTabs = useCallback(() => {
     if (!localStateObject.currentAgents) {
       return [];
     }
-    return localStateObject.currentAgents.agents.map((a, i) => (
-      <TabsContent
-        key={i}
-        value={a.name || `Agent ${i + 1}`}
-        className="h-[100%]? overflow-y-auto"
-      >
-        <div
-          className={cn(
-            "pb-[500px]? overflow-y-auto",
-            !fullLength ? "h-[66em]? h-screen?" : "h-fit"
-          )}
+    
+    return localStateObject.currentAgents.agents.map((agent, i) => {
+      
+      // Use agent.disabled directly, which is now managed by the useEffect hook
+      const effectiveDisabled = agent.disabled ?? false; // Use nullish coalescing for safety
+      
+      // Keep isActiveParticipant calculation, but ensure it uses up-to-date settings
+      const currentSettings = localStateObject.orchestrationSettings || defaultOrchestrationSettings;
+      const isDirectModeForHighlight = currentSettings.orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION;
+      const hasCustomSetForHighlight = currentSettings.customAgentSet && currentSettings.customAgentSet.length > 0;
+      const isActiveParticipant = !effectiveDisabled && !isDirectModeForHighlight && hasCustomSetForHighlight;
+      
+      // Remove debug log
+      // console.log(`[mapAgentsToTabs Render] Agent: ${agent.name}, agent.disabled: ${agent.disabled}, effectiveDisabled: ${effectiveDisabled}`);
+
+      return (
+        <TabsContent
+          key={i}
+          value={agent.name || `Agent ${i + 1}`}
+          className="h-[100%]? overflow-y-auto"
         >
-          {a.type && (
-            <div>
-              <div className="flex items-center justify-between w-full">
-                {/* <div>{a.name || `Agent ${i + 1} ${a.index}`}</div> */}
-                {/* {UTILS_isToolAgent(a.type as AgentTypeEnum) ? (
-                  <div>TOOL AGENT</div>
-                ) : (
-                  <div>TASK AGENT</div>
-                )} */}
+          <div
+            className={cn(
+              "pb-[500px]? overflow-y-auto",
+              !fullLength ? "h-[66em]? h-screen?" : "h-fit"
+            )}
+          >
+            {agent.type && (
+              <div>
+                <div className="flex items-center justify-between w-full">
+                  {/* <div>{a.name || `Agent ${i + 1} ${a.index}`}</div> */}
+                  {/* {UTILS_isToolAgent(a.type as AgentTypeEnum) ? (
+                    <div>TOOL AGENT</div>
+                  ) : (
+                    <div>TASK AGENT</div>
+                  )} */}
+                </div>
+                <Agent_comp
+                  elevenLabsVoices={elevenLabsVoices}
+                  voicesLoaded={voicesLoaded}
+                  agent_index={i}
+                  saveAgentState={saveAgentState}
+                  localStateObject={localStateObject}
+                  setLocalStateObject={setlocalStateObject}
+                  storedAgentStates={savedAgentStates}
+                  manualLoadAgentState={manualLoadAgentState}
+                  handleAutoPrompt={handleAutoPrompt}
+                  autoPromptModel={autoPromptModel}
+                  autoPromptExtraInfo={autoPromptExtraInfo}
+                  setAutoPromptExtraInfo={setAutoPromptExtraInfo}
+                  handleAutoPromptModelChange={(e: string) => console.log(e)}
+                  handlePromptTextToSet={handlePromptTextToSet}
+                  refreshAgentStates={refreshAgentStates}
+                  isVisuallyDisabled={effectiveDisabled}
+                />
               </div>
-              <Agent_comp
-                elevenLabsVoices={elevenLabsVoices}
-                voicesLoaded={voicesLoaded}
-                agent_index={i}
-                saveAgentState={saveAgentState}
-                localStateObject={localStateObject}
-                setLocalStateObject={setlocalStateObject}
-                storedAgentStates={savedAgentStates}
-                manualLoadAgentState={manualLoadAgentState}
-                handleAutoPrompt={handleAutoPrompt}
-                autoPromptModel={autoPromptModel}
-                autoPromptExtraInfo={autoPromptExtraInfo}
-                setAutoPromptExtraInfo={setAutoPromptExtraInfo}
-                handleAutoPromptModelChange={(e: string) => console.log(e)}
-                handlePromptTextToSet={handlePromptTextToSet}
-                refreshAgentStates={refreshAgentStates}
-              />
-            </div>
-          )}
-        </div>
-      </TabsContent>
-    ));
+            )}
+          </div>
+        </TabsContent>
+      );
+    });
   }, [
-    localStateObject.currentAgents?.agents,
+    localStateObject,
     elevenLabsVoices,
     voicesLoaded,
     saveAgentState,
-    inputChanged,
     setlocalStateObject,
-    setAIMessages,
-    handleChangeIndex,
+    fullLength,
+    currentAgentIndex
   ]);
 
   // ELEVEN_LABS_VOICE_LIST
@@ -775,7 +872,7 @@ function ACFramework({
   useEffect(() => {
     // Depend on the agent list structure/length, not the whole function
     if (localStateObject?.currentAgents?.agents) {
-      console.log("USEFFECT:initializeAgentKnowledgeBasesStatus called");
+      // console.log("USEFFECT:initializeAgentKnowledgeBasesStatus called");
       initializeAgentKnowledgeBasesStatus();
     }
     // Only re-run if the number of agents changes or the initialize function itself changes (due to its own dependencies)
@@ -805,79 +902,99 @@ function ACFramework({
             onClick={() => {
               agentAutoSpawn();
             }}
-            className="flex items-center justify-center h-4 w-4 p-0 text-xs font-medium bg-indigo-500/20 hover:bg-indigo-500/30 rounded-md border border-indigo-500/20 hover:border-indigo-500/30 transition-colors"
+            className="flex items-center justify-center h-4 w-4 p-0 text-xs font-medium bg-indigo-500/20 hover:bg-indigo-500/30 rounded-md border border-indigo-500/20 hover:border-indigo-500/30 transition-colors cursor-pointer"
           >
             +
           </div>
           <div className="flex-1">
             <div className="flex flex-wrap gap-1 p-1">
               {localStateObject.currentAgents.agents &&
-                localStateObject.currentAgents.agents.map((agent, i) => (
-                  <TabsTrigger
-                    onClick={(event) => {
-                      if ((event as unknown as MouseEvent).ctrlKey) {
-                        if (
-                          confirm(
-                            `Are you sure you want to delete Agent ${i + 1}?`
-                          )
-                        ) {
-                          const _newState = { ...localStateObject };
-                          _newState.currentAgents.agents.splice(i, 1);
-                          setlocalStateObject(_newState);
+                localStateObject.currentAgents.agents.map((agent, i) => {
+                  
+                  // No longer calculate dynamic disabling here - read directly from agent.disabled
+                  const effectiveDisabled = agent.disabled ?? false; // Use nullish coalescing for safety
+
+                  // Keep isActiveParticipant calculation, but ensure it uses up-to-date settings
+                  const currentSettings = localStateObject.orchestrationSettings || defaultOrchestrationSettings;
+                  const isDirectModeForHighlight = currentSettings.orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION;
+                  const hasCustomSetForHighlight = currentSettings.customAgentSet && currentSettings.customAgentSet.length > 0;
+                  const isActiveParticipant = !effectiveDisabled && !isDirectModeForHighlight && hasCustomSetForHighlight;
+                  
+                  // Remove debug log
+                  // console.log(`[TabsList Render] Agent: ${agent.name}, agent.disabled: ${agent.disabled}, effectiveDisabled: ${effectiveDisabled}`);
+
+                  return (
+                    <TabsTrigger
+                      onClick={(event) => {
+                        if ((event as unknown as MouseEvent).ctrlKey) {
+                          if (
+                            confirm(
+                              `Are you sure you want to delete Agent ${i + 1}?`
+                            )
+                          ) {
+                            const _newState = { ...localStateObject };
+                            _newState.currentAgents.agents.splice(i, 1);
+                            setlocalStateObject(_newState);
+                          }
                         }
-                      }
-                    }}
-                    className={cn(
-                      "relative group flex items-center gap-1.5 px-2 py-1 min-w-[120px] max-w-[160px]",
-                      "rounded-md border transition-all duration-200",
-                      "hover:scale-102 hover:-translate-y-0.5",
-                      i === currentAgentIndex
-                        ? "bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border-indigo-500/30 text-indigo-200"
-                        : "bg-slate-900/50 border-white/5 text-slate-300 hover:bg-slate-800/50",
-                      agent.disabled && "opacity-40 line-through",
-                      UTILS_isToolAgent(agent.type as AgentTypeEnum)
-                        ? "hover:border-violet-500/30"
-                        : "hover:border-indigo-500/30",
-                      agent.training &&
-                        "border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.1)]"
-                    )}
-                    key={i}
-                    value={agent.name || `Agent ${i + 1}`}
-                  >
-                    <div className="flex items-center gap-2 w-full">
+                      }}
+                      className={cn(
+                        "relative group flex items-center gap-1.5 px-2 py-1 min-w-[120px] max-w-[160px]",
+                        "rounded-md border transition-all duration-200",
+                        "hover:scale-102 hover:-translate-y-0.5",
+                        i === currentAgentIndex
+                          ? "bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border-indigo-500/30 text-indigo-200"
+                          : "bg-slate-900/50 border-white/5 text-slate-300 hover:bg-slate-800/50",
+                        effectiveDisabled && "opacity-50",
+                        UTILS_isToolAgent(agent.type as AgentTypeEnum)
+                          ? "hover:border-violet-500/30"
+                          : "hover:border-indigo-500/30",
+                        agent.training &&
+                          "border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.1)]"
+                      )}
+                      key={i}
+                      value={agent.name || `Agent ${i + 1}`}
+                    >
+                      <div className="flex items-center gap-2 w-full">
+                        <div
+                          className={cn(
+                            "flex-shrink-0 p-1 rounded-md",
+                            UTILS_isToolAgent(agent.type as AgentTypeEnum)
+                              ? "bg-violet-500/10 text-violet-200"
+                              : "bg-indigo-500/10 text-indigo-200"
+                          )}
+                        >
+                          <BotIcon className="w-3 h-3" />
+                        </div>
+                        <span className={cn(
+                          "font-medium truncate flex-1 text-[11px]",
+                          isActiveParticipant ? "text-green-400" : ""
+                        )}>
+                          {agent.name || `Agent ${i + 1}`}
+                        </span>
+                      </div>
                       <div
                         className={cn(
-                          "flex-shrink-0 p-1 rounded-md",
-                          UTILS_isToolAgent(agent.type as AgentTypeEnum)
-                            ? "bg-violet-500/10 text-violet-200"
-                            : "bg-indigo-500/10 text-indigo-200"
+                          "absolute right-1.5 opacity-0 group-hover:opacity-100 transition-opacity",
+                          "flex items-center gap-1"
                         )}
                       >
-                        <BotIcon className="w-3 h-3" />
+                        {/* Directly use agent.disabled managed by effect */} 
+                        {agent.disabled && (
+                          <span className="text-[10px] text-gray-500"> 
+                            Inactive
+                          </span>
+                        )}
+                         {/* Keep training indicator */}
+                        {agent.training && (
+                          <span className="text-[10px] text-yellow-400">
+                            Training
+                          </span>
+                        )}
                       </div>
-                      <span className="font-medium truncate flex-1 text-[11px]">
-                        {agent.name || `Agent ${i + 1}`}
-                      </span>
-                    </div>
-                    <div
-                      className={cn(
-                        "absolute right-1.5 opacity-0 group-hover:opacity-100 transition-opacity",
-                        "flex items-center gap-1"
-                      )}
-                    >
-                      {agent.disabled && (
-                        <span className="text-[10px] text-red-400">
-                          Disabled
-                        </span>
-                      )}
-                      {agent.training && (
-                        <span className="text-[10px] text-yellow-400">
-                          Training
-                        </span>
-                      )}
-                    </div>
-                  </TabsTrigger>
-                ))}
+                    </TabsTrigger>
+                  );
+              })}
             </div>
           </div>
           <div>

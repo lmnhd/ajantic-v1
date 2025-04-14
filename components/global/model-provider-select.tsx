@@ -18,7 +18,11 @@ import { AnthropicModelNames } from "@/src/app/api/model/anthropic";
 import { MistralModelNames } from "@/src/app/api/model/mistral";
 import { CohereModelNames } from "@/src/app/api/model/cohere";
 import { GoogleGenerativeAIModelNames } from "@/src/app/api/model/google";
-import { cn, UTILS_getGenericData, UTILS_putGenericData } from "@/src/lib/utils";
+import {
+  cn,
+  UTILS_getGenericData,
+  UTILS_putGenericData,
+} from "@/src/lib/utils";
 import { SERVER_getOpenAIModelNames } from "@/src/lib/server";
 import { OpenAIModelNames } from "@/src/app/api/model/openai";
 import { DeepSeekModelNames } from "@/src/app/api/model/deepseek";
@@ -28,7 +32,6 @@ type ModelProviderSelectProps = {
   model: ModelArgs;
   index: number;
   localState: AISessionState;
-  setLocalState: (state: AISessionState) => void;
   modelNameChanged?: (e: string) => void;
   modelProviderChanged?: (e: string) => void;
   temperatureChanged?: (e: number) => void;
@@ -38,7 +41,6 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
   model,
   index,
   localState,
-  setLocalState,
   modelNameChanged,
   modelProviderChanged,
   temperatureChanged,
@@ -74,76 +76,6 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
     }
   };
 
-  const getFirstModelName = (modelProvider: ModelProviderEnum) => {
-    switch (modelProvider) {
-      case ModelProviderEnum.ANTHROPIC:
-        return Object.keys(modelsData.Anthropic)[0];
-      case ModelProviderEnum.OPENAI:
-        return Object.keys(modelsData.OpenAI)[0];
-      case ModelProviderEnum.MISTRAL:
-        return Object.keys(modelsData.Mistral)[0];
-      case ModelProviderEnum.COHERE:
-        return Object.keys(modelsData.Cohere)[0];
-      case ModelProviderEnum.GOOGLE_G:
-        return Object.keys(modelsData.Google)[0];
-      case ModelProviderEnum.DEEPSEEK:
-        return Object.keys(modelsData.DeepSeek)[0];
-      default:
-        return "";
-    }
-  };
-
-  const setModelProvider = (
-    modelProvider: ModelProviderEnum,
-    index: number
-  ) => {
-    setLocalState({
-      ...localState,
-      currentModels: [
-        ...localState.currentModels.slice(0, index),
-        {
-          provider: modelProvider,
-          modelName: getFirstModelName(modelProvider),
-          temperature: 0.7,
-        },
-        ...localState.currentModels.slice(index + 1),
-      ],
-    });
-  };
-
-  const setModelName = (modelName: ModelNames, index: number) => {
-    setLocalState({
-      ...localState,
-      currentModels: [
-        ...localState.currentModels.slice(0, index),
-        {
-          provider: model.provider,
-          modelName: modelName,
-          temperature: 0.7,
-        },
-        ...localState.currentModels.slice(index + 1),
-      ],
-    });
-  };
-
-  const setTemperature = (temperature: number) => {
-    if (temperatureChanged) {
-      temperatureChanged(temperature);
-    }
-    setLocalState({
-      ...localState,
-      currentModels: [
-        ...localState.currentModels.slice(0, index),
-        {
-          provider: model.provider,
-          modelName: model.modelName || "",
-          temperature,
-        },
-        ...localState.currentModels.slice(index + 1),
-      ],
-    });
-  };
-
   useEffect(() => {
     if (temperatureRef.current) {
       setTempText(temperatureRef.current.value);
@@ -162,8 +94,6 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
           if (modelProviderChanged) {
             modelProviderChanged(e as ModelProviderEnum);
           }
-          setModelProvider(e as ModelProviderEnum, index);
-          setTemperature(0.7);
         }}
       >
         <SelectTrigger>
@@ -187,7 +117,6 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
           if (modelNameChanged) {
             modelNameChanged(e);
           }
-          setModelName(e, index);
         }}
       >
         <SelectTrigger>
@@ -232,6 +161,32 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
             ))}
         </SelectContent>
       </Select>
+      {/* Temperature Input (if needed, keep separate) */}
+      {/* Example - using direct callback */}
+      {temperatureChanged && (
+        <div className="mt-2">
+          <label
+            htmlFor={`temp-range-${index}`}
+            className="text-xs text-gray-400 block mb-1"
+          >
+            Temperature: {tempText}
+          </label>
+          <input
+            id={`temp-range-${index}`}
+            type="range"
+            min="0"
+            max="1"
+            step="0.1"
+            value={tempText} // Use controlled value
+            // defaultValue={model.temperature || 0.7} // Remove default value for controlled input
+            onChange={(e) => {
+              setTempText(e.target.value); // Update local text state
+              temperatureChanged(parseFloat(e.target.value));
+            }}
+            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -256,7 +211,6 @@ export default function ModelSelectGroup({
             model={model}
             index={index}
             localState={localState}
-            setLocalState={setLocalState}
           />
         </div>
       ))}

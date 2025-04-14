@@ -19,6 +19,8 @@ import { MODEL_getModel_ai } from "@/src/lib/vercelAI-model-switcher";
 import { UTILS_getModelArgsByName, UTILS_getModelsJSON } from "@/src/lib/utils";
 import { ToolRequest } from "@/src/lib/types";
 import { ensureUnifiedToolRequest } from "@/src/lib/agent-tools/auto-gen-tool/tool-request-adapter";
+import { ToolRegistry } from "../tool-registry/registry";
+import { createCustomToolReference } from "../tool-registry/custom-tool-ref";
 
 // Add global declaration for tool registry
 declare global {
@@ -51,68 +53,84 @@ type CustomToolCoreType = z.infer<typeof customToolCoreSchema>;
 
 // --- Core Logic Functions --- 
 
-export const CORE_createTool = async (
-  agentName: string,
-  userId: string,
-  textChatLogs: TextChatLogProps[],
-  params: CustomToolCoreType
-) => {
-  const { name, description, parameters, functionBody, category } = params;
-  logger.tool("Auto-gen Core - Creating Custom Tool", {
-    name,
-    description,
-    parameters: JSON.stringify(parameters),
-    category: category || "DEFAULT"
-  });
-
-  textChatLogs.push({
-    role: "function",
-    message: `CORE: Creating custom tool: "${name}" with ${parameters.length} parameter(s)`,
-    agentName,
-    timestamp: new Date()
-  });
-
+export async function CORE_createTool(
+  agentName: string, 
+  userId: string, 
+  textChatLogs: TextChatLogProps[], 
+  params: any
+) {
   try {
-    const customTool = await UTILS_generateDynamicTool({
-      name,
-      description,
+    // Validate parameters
+    if (!params.name || !params.description || !params.parameters || !params.functionBody) {
+      return {
+        success: false,
+        message: "Missing required parameters for tool creation"
+      };
+    }
+
+    // Normalize parameters format
+    const parameters = params.parameters.map((param: any) => ({
+      name: param.name,
+      type: param.type,
+      description: param.description,
+      required: param.required !== false // Default to required
+    }));
+
+    // Register the tool in the central registry
+    const toolRef = await ToolRegistry.registerTool(
+      params.name,
+      params.description,
       parameters,
-      functionBody
-    });
-    await UTILS_registerDynamicTool(agentName, name, customTool);
-
-    await SERVER_storeGeneralPurposeData(
-      JSON.stringify({
-        name,
-        description,
-        parameters,
-        functionBody,
-        category
-      }),
-      name,
-      description,
-      "",
-      `CUSTOM_TOOLS_${agentName}_${userId}`,
-      true
+      params.functionBody,
+      "function",
+      {
+        agentId: agentName,
+        userId: userId,
+        source: "agent-created",
+        createdAt: new Date().toISOString()
+      }
     );
-
-    logger.tool("Auto-gen Core - Created Successfully", { name });
-    return JSON.stringify({
+    
+    // Get the tool ID from the reference
+    const toolId = toolRef.split(':')[1];
+    
+    // Log the creation
+    logger.tool("Created custom tool", {
+      toolName: params.name,
+      toolId,
+      agentName,
+      userId
+    });
+    
+    // Add to text chat logs if available
+    if (textChatLogs && textChatLogs.push) {
+      textChatLogs.push({
+        role: "system",
+        message: `Created custom tool "${params.name}" with reference ${toolRef}`,
+        agentName
+      });
+    }
+    
+    return {
       success: true,
-      message: `Tool "${name}" created successfully and is now available to use`,
-      toolName: name
+      toolRef: toolRef,
+      toolId: toolId,
+      message: `Tool ${params.name} created successfully and registered with ID ${toolId}.`
+    };
+  } catch (error: any) {
+    logger.error("Error creating custom tool", {
+      error: error.message || "Unknown error",
+      toolName: params.name,
+      agentName,
+      userId
     });
-  } catch (error) {
-    logger.error("Auto-gen Core - Creation Failed", {
-      name,
-      error: error instanceof Error ? error.message : "Unknown error"
-    });
-    return JSON.stringify({
+    
+    return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to create tool"
-    });
+      message: `Error creating tool: ${error.message || "Unknown error"}`
+    };
   }
-};
+}
 
 export const CORE_registerPredefinedTool = async (
   agentName: string,

@@ -16,6 +16,7 @@ import {
   UTILS_getModelsJSON,
   ValueType,
 } from "@/src/lib/utils";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types/base";
 
 import Document from "next/document";
 import { z } from "zod";
@@ -34,6 +35,8 @@ import {
 } from "@/src/lib/agent-memory/store-retrieve";
 import { DynamicFormSchema } from "@/src/lib/post-message-analysis/form-creator-core";
 import { anthropic } from "@ai-sdk/anthropic";
+import { ToolRegistry } from "../agent-tools/tool-registry/registry";
+import { createCustomToolReference } from "../agent-tools/tool-registry/custom-tool-ref";
 
 // Using the unified ToolRequest interface from lib/types.ts
 
@@ -45,58 +48,6 @@ const toolRequestSchema = z.object({
   suggestedOutputs: z.array(z.string()).describe("The suggested outputs for the tool"),
 });
 
-const autogen_agent_knowledge_base_schema = z.object({
-  knowledgeBaseItems: z
-    .array(
-      z.object({
-        researchTopic: z.string(),
-        description: z.string(),
-      })
-    )
-    .describe(
-      "A list of topics that should be researched and added to the agent's knowledge base. Minimum 3 items."
-    ),
-});
-
-// Create a runtime array of the enum values instead of using Object.values
-const formValueTypes = ["TEXT", "NUMBER", "BOOLEAN", "ENUM", "DATE"] as const;
-
-const dynamicFormSchema: z.ZodSchema<DynamicFormSchema> = z.array(
-  z.object({
-    formName: z.string(),
-    key: z.string(),
-    valueType: z.enum([
-      ValueType.STRING,
-      ValueType.NUMBER,
-      ValueType.BOOLEAN,
-      ValueType.OBJECT,
-      ValueType.ARRAY,
-      ValueType.NULL,
-      ValueType.UNDEFINED,
-      ValueType.DATE,
-      ValueType.ENUM,
-      ValueType.FILE,
-    ]),
-    enumValues: z.array(z.string()).optional(),
-    enumLabels: z.array(z.string()).optional(),
-  })
-);
-
-// const autogen_schema = z.object({
-//     team_name: z.string(),
-//     team_objective: z.string(),
-//     newAgents: z.array(newAgentSchema).describe("The list of new agents that will be created for the workflow. If no new agents are needed, use an empty array."),
-//     existingAgents: z.array(z.string()).describe("The list of existing agent names that will be used in the workflow. If no existing agents are needed, use an empty array."),
-//     agentSequence: z.array(z.string()).describe("The list of agents involved with the workflow. In a sequential workflow, the agents will be executed in the order they are listed."),
-//     sequenceOrder: z.enum(["sequential", "random", "auto"]).describe("The order in which the agents will be executed. Sequential will execute the agents in the order they are listed. Random will execute the agents in a random order. Auto will use an LLM to determine the order in real time based on the messages."),
-//     context: z.array(z.object({setName: z.string(), text: z.string(), visibleToAgents: z.array(z.string())})).describe("The context that will be used to store information relevant to the team. This will be used to store information that is relevant to the team, such as the conversation history, the current task, and any other relevant information."),
-//     toolRequests: z.array(toolRequestSchema).describe("OPTIONAL: For requesting tools that do not already exist, use this section to describe the tool and its inputs and outputs.").optional(),
-//     infoRequest: dynamicFormSchema.optional().describe("OPTIONAL: For requesting information from the user needed to complete the workflow."),
-// });
-
-const formatModelResearchOutputSchema = z.object({
-  models: z.array(z.object({ provider: z.string(), modelName: z.string() })),
-});
 export interface AutoGenAgent {
   name: string;
   type: "manager" | "agent" | "researcher" | "tool-operator";
@@ -111,7 +62,7 @@ export interface AutoGenTeam {
   availableAgents: AutoGenAgent[];
   newAgents: AutoGenAgent[];
   agentSequence: string[];
-  orchestrationType: "sequential" | "random" | "auto";
+  orchestrationType: OrchestrationType2;
   processSteps: string[];
 }
 
@@ -148,40 +99,14 @@ const autogen_outline_schema = z.object({
       "The list of agents involved with the workflow. Do not add the same agent more than once. In a sequential workflow, the agents will be executed in the order they are listed."
     ),
   orchestrationType: z
-    .enum(["sequential", "random", "auto"])
+    .nativeEnum(OrchestrationType2)
     .describe(
-      "The type of orchestration to use for the workflow. Sequential will execute the agents in the order they are listed. Random will execute the agents in a random order. Auto will use an LLM (auto-agent/manager) to determine the order in real time based on the messages. Auto is recommended when task verification for agent processes is needed."
+      "The type of orchestration to use for the workflow. SEQUENTIAL_WORKFLOW executes agents in sequence. RANDOM_WORKFLOW executes in random order. LLM_ROUTED_WORKFLOW uses an LLM to determine order (recommended for task verification). MANAGER_DIRECTED_WORKFLOW uses a manager agent to direct the workflow."
     ),
   processSteps: z
     .array(z.string())
     .describe("The steps of the process to be automated without the step numbers."),
 });
-
-// Function to extract all models with providers from the nested JSON structure
-const getAllModelsWithProviders = () => {
-  const modelsJSON = UTILS_getModelsJSON();
-  const modelsList: string[] = [];
-
-  // Iterate through provider categories
-  Object.keys(modelsJSON).forEach((providerCategory) => {
-    const modelsInCategory =
-      modelsJSON[providerCategory as keyof typeof modelsJSON];
-
-    // Iterate through models in each category
-    Object.keys(modelsInCategory).forEach((modelKey) => {
-      // Need to use a more specific type assertion
-      const model = (modelsInCategory as any)[modelKey];
-      modelsList.push(`${model.provider}/${model.name}`);
-    });
-  });
-
-  return modelsList;
-};
-
-// Create schema using the extracted model list
-const autogen_agent_model_schema = z.array(
-  z.enum(getAllModelsWithProviders() as [string, ...string[]])
-);
 
 export type AutoGenWorkflowProps = {
   processToAutomate: string;
@@ -266,6 +191,10 @@ export const TEAM_autogen_create_workflow = async (
       let outlineObject = JSON.parse(outlineObjectString ?? "{}") as AutoGenTeam;
       team.name = outlineObject?.team_name ?? "";
       team.objectives = outlineObject?.team_objective ?? "";
+      
+      // Directly use the orchestrationType from the outline
+      team.orchestrationType = outlineObject?.orchestrationType || OrchestrationType2.SEQUENTIAL_WORKFLOW;
+      
       // add only the agents found in the sequence
       team.agents =
         outlineObject?.agentSequence.map((agentName) => {
@@ -356,21 +285,39 @@ export const TEAM_autogen_create_workflow = async (
       }
       // create a context and add a set with the process steps
       const context: ContextContainerProps[] = [];
-      context.push({
-        setName: "Process Steps",
-        text: outlineObject?.processSteps?.join("\n") ?? "",
+      
+      // Create a more complete context object with all expected properties
+      const processGuidelinesContext = {
+        setName: "Process Guidelines",
+        text: outlineObject?.processSteps
+          ?.map((step, index) => `${index + 1}. ${step}`)
+          .join("\n") ?? "",
         hiddenFromAgents: team.agents
           .filter((a) => a.type !== "manager")
           .map((a) => a.name),
         lines: [],
-        
         fullScreen: false,
         isDisabled: false,
         formSchema: undefined,
-       
+        id: `process-guidelines-${Date.now()}`, // Add a unique ID
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      context.push(processGuidelinesContext);
+      
+      // Set the context sets on the team object
+      team.contextSets = context;
+      
+      // Log detailed information about the context for debugging
+      console.log("Created Process Guidelines context:", {
+        contextName: processGuidelinesContext.setName,
+        contextLength: processGuidelinesContext.text.length,
+        contextFirstLine: processGuidelinesContext.text.split('\n')[0],
+        hiddenFromCount: processGuidelinesContext.hiddenFromAgents?.length || 0,
+        teamContextSets: team.contextSets.length
       });
-
-      // If modifications are present, store process notes as memory - store useful info about common modifications for future auto-gen creations to remember
+      
       if (modifications && modifications.length > 0) {
         const processNotes = await generateObject({
           model: await MODEL_getModel_ai(
@@ -392,13 +339,23 @@ export const TEAM_autogen_create_workflow = async (
           { modifications: modifications, keyword: processNotes.object.keyword }
         );
       }
+      
+      // Add additional logging before return
+      console.log("Returning workflow with team and context:", {
+        teamName: team.name,
+        teamObjective: team.objectives,
+        agentCount: team.agents.length,
+        contextSetsCount: team.contextSets.length,
+        returnedContextSetsCount: context.length
+      });
+      
       return {
         processToAutomate,
         readyMadeAgents,
         outlineObjectString: outlineObjectString,
         outlineApproved: outlineApproved,
         resultTeam: team,
-        resultContext: context,
+        resultContext: team.contextSets, // Ensure we're returning the same context objects
       } as AutoGenWorkflowProps;
     }
 
@@ -436,7 +393,14 @@ export const TEAM_autogen_create_outline = async (
     availableAgents,
     outlineObject,
     modifications,
-    memoryNotes
+    memoryNotes,
+    // Add info about available orchestration types
+    [
+      { name: "SEQUENTIAL_WORKFLOW", description: "Agents process in fixed forward order" },
+      { name: "RANDOM_WORKFLOW", description: "Agents process in random order each round" },
+      { name: "LLM_ROUTED_WORKFLOW", description: "An LLM analyzes messages to route tasks dynamically" },
+      { name: "MANAGER_DIRECTED_WORKFLOW", description: "A Manager agent explicitly directs the next agent in its response" }
+    ]
   );
 
   console.log("!!!_outlinePrompt!!!", _outlinePrompt);
@@ -461,7 +425,6 @@ export const TEAM_autogen_create_outline = async (
     agentSequence: outline.object.agentSequence,
     orchestrationType: outline.object.orchestrationType,
     processSteps: outline.object.processSteps,
-
   } as AutoGenTeam;
 };
 
@@ -560,8 +523,24 @@ export const TEAM_autogen_create_agent = async (
     });
 
     // Initialize tools array with standard tools
-    let agentTools: string[] = agentProperties.object.tools || [];
-    let customToolsRecord: Record<string, any> = {};
+    let agentTools: string[] = [];
+    
+    // Add standard tools from the enum if this is a TOOL_OPERATOR
+    if (agentProperties.object.type === AgentTypeEnum.TOOL_OPERATOR) {
+      // Convert standard tool names to actual enum values
+      agentTools = (agentProperties.object.tools || [])
+        .map(toolName => {
+          // If it's a valid enum value, use it
+          if (Object.values(AI_Agent_Tools).includes(toolName as AI_Agent_Tools)) {
+            return toolName;
+          }
+          // If not, check if it's a string that matches an enum value
+          const matchingEnum = Object.values(AI_Agent_Tools).find(
+            enumVal => enumVal.toLowerCase() === toolName.toLowerCase()
+          );
+          return matchingEnum || toolName;
+        });
+    }
 
     // Generate any requested custom tools
     if (
@@ -588,69 +567,56 @@ export const TEAM_autogen_create_agent = async (
               suggestedOutputs: toolRequest.suggestedOutputs,
             } as ToolRequest;
 
-            const _definition = await CORE_generateCustomToolDefinition(
+            // Generate the tool definition
+            const toolDef = await CORE_generateCustomToolDefinition(
               unifiedRequest
             );
-            return _definition;
-          }
-        );
-
-        // Wait for all tool definitions to be generated
-        const toolDefinitions = await Promise.all(toolRequestPromises);
-
-        // Create the custom tools
-        const customToolsPromise = AGENT_TOOLS_loadCustomTools(
-          toolDefinitions,
-          agentProperties.object.name,
-          userId
-        );
-        
-        // Process any promises from the returned object
-        customToolsRecord = {};
-        try {
-          for (const [key, value] of Object.entries(customToolsPromise)) {
-            try {
-              if (value instanceof Promise) {
-                customToolsRecord[key] = await value;
-              } else {
-                customToolsRecord[key] = value;
+            
+            // Register the tool in the central registry
+            const toolRef = await ToolRegistry.registerTool(
+              toolDef.name,
+              toolDef.description,
+              toolDef.parameters,
+              toolDef.implementation || "",
+              "function",
+              {
+                agentId: agentProperties.object.name,
+                userId: userId,
+                source: "autogen",
+                createdAt: new Date().toISOString()
               }
-            } catch (toolError) {
-              logger.error(`Error processing custom tool '${key}'`, {
-                error: toolError instanceof Error ? toolError.message : "Unknown error",
-                agent: agentProperties.object.name
-              });
-              // Skip this tool but continue with others
+            );
+            
+            // Add the tool reference to the agent's tools array
+            if (!agentTools.includes(toolRef)) {
+              agentTools.push(toolRef);
             }
+            
+            return {
+              toolId: toolRef.split(':')[1],
+              toolRef,
+              name: toolDef.name
+            };
           }
-        } catch (toolsError) {
-          logger.error("Error processing custom tools", {
-            error: toolsError instanceof Error ? toolsError.message : "Unknown error",
-            agent: agentProperties.object.name
-          });
-          // Continue with agent creation even if tools fail
-        }
+        );
 
-        // Add custom tool names to the agent's tools array
-        Object.keys(customToolsRecord).forEach((toolName) => {
-          if (!agentTools.includes(toolName)) {
-            agentTools.push(toolName);
-          }
-        });
-
+        // Wait for all tool registrations to complete
+        const registeredTools = await Promise.all(toolRequestPromises);
+        
         // Log the created tools
         logger.tool("Created Custom Tools", {
-          count: Object.keys(customToolsRecord).length,
+          count: registeredTools.length,
           agent: agentProperties.object.name,
-          toolNames: Object.keys(customToolsRecord),
+          toolReferences: registeredTools.map(t => t.toolRef),
+          toolNames: registeredTools.map(t => t.name)
         });
 
         // Add a special log just for debugging
         console.log(
           `DEBUG: Created ${
-            Object.keys(customToolsRecord).length
+            registeredTools.length
           } custom tools for ${agentProperties.object.name}:`,
-          Object.keys(customToolsRecord)
+          registeredTools.map(t => t.name)
         );
       } catch (error) {
         logger.error("Error creating custom tools", {
@@ -660,6 +626,7 @@ export const TEAM_autogen_create_agent = async (
       }
     }
 
+    // IMPORTANT: Create agent with ONLY tool references now
     result = {
       name: agentProperties.object.name,
       roleDescription: agentProperties.object.roleDescription,
@@ -671,30 +638,54 @@ export const TEAM_autogen_create_agent = async (
         modelName: "claude-3-5-sonnet-20240620",
         temperature: 0.7,
       },
-      tools: agentTools,
-      customTools: customToolsRecord, // Store the custom tools for later use
+      tools: agentTools, // Contains standard tools and custom tool references
     } as AgentComponentProps;
+
+    // Log the created agent's tools for debugging
+    logger.debug("Created agent with tools", {
+      agentName: agentProperties.object.name,
+      toolCount: agentTools.length,
+      tools: agentTools,
+      standardTools: agentTools.filter(tool => 
+        Object.values(AI_Agent_Tools).includes(tool as AI_Agent_Tools)
+      ),
+      customTools: agentTools.filter(tool => 
+        typeof tool === 'string' && tool.startsWith('CUSTOM_TOOL:')
+      )
+    });
 
     // check for knowledge base
     if (agentProperties.object.knowledgeBase) {
-      // create knowledge base
+      // Log that we're creating a knowledge base
+      logger.log(`Creating knowledge base for agent ${agentProperties.object.name} - this is a highly selective process`);
+      
+      // create knowledge base with limited responsibilities
       const responsibilities = await generateObject({
         model: await MODEL_getModel_ai(
           UTILS_getModelArgsByName("claude-3-7-sonnet-20250219")
         ),
         schema: z.object({
-          responsibilities: z.array(z.string()),
+          responsibilities: z.array(z.string()).max(3),
         }),
         prompt: PROMPT_AUTO_GENERATE_WORKFLOW.generateResponsibilities(
           agentProperties.object.title,
           agentProperties.object.roleDescription,
           teamObjective
-        ),
+        ) + "\n\nIMPORTANT: Be extremely focused and selective. Return ONLY the 2-3 most critical responsibilities.",
       });
+      
+      // Ensure we have no more than 3 responsibilities regardless of model output
+      const limitedResponsibilities = responsibilities.object.responsibilities.slice(0, 3);
+      
+      logger.debug(`Generated ${limitedResponsibilities.length} responsibilities for knowledge base`, {
+        agent: agentProperties.object.name,
+        responsibilities: limitedResponsibilities
+      });
+      
       await KB_autoCreate(
         userId,
         agentProperties.object.name,
-        responsibilities.object.responsibilities,
+        limitedResponsibilities,
         agentProperties.object.title,
         agentProperties.object.roleDescription,
         teamObjective
@@ -753,6 +744,9 @@ const getModelList = (stringOrArray: "string" | "array") => {
   const model11 = UTILS_getModelArgsByName(
     UTILS_getModelsJSON().Google["models/gemini-1.5-pro-latest"].name
   );
+  const model12 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Google["models/gemini-2.5-pro-exp-03-25"].name
+  );
 
   return stringOrArray === "string"
     ? [
@@ -767,6 +761,7 @@ const getModelList = (stringOrArray: "string" | "array") => {
         model9,
         model10,
         model11,
+        model12,
       ]
         .map((model) => `${model.provider}/${model.modelName}`)
         .join("\n")
@@ -782,6 +777,7 @@ const getModelList = (stringOrArray: "string" | "array") => {
         model9,
         model10,
         model11,
+        model12,
       ];
 };
 
@@ -826,9 +822,6 @@ export const TEAM_autogen_assign_models = async (
 
   return modelResearchOutput.object.model_assignments;
 };
-
-// For usage elsewhere (if needed)
-export const MODEL_autogen_getAvailableModels = getAllModelsWithProviders;
 
 // Helper function to convert object to XML-style string for better readability in prompts
 

@@ -57,7 +57,7 @@ import {
   AGENT_TOOLS_agentToAgent_v2,
   SubConversationProps,
 } from "./agent-tools/agent-to-agent";
-import { AGENT_TOOLS_urlScrape } from "./agent-tools/agent-url-scrape";
+import { AGENT_TOOLS_urlScrape } from "./agent-tools/url-scrape/url-scrape";
 import { VectorStoreRetriever } from "@langchain/core/vectorstores";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { OpenAIEmbeddings } from "@langchain/openai";
@@ -83,6 +83,7 @@ import { AGENT_TOOLS_knowledgeBase_query, AGENT_TOOLS_pinecone } from "@/src/lib
 import { AGENT_TOOLS_perplexity2 } from "@/src/lib/agent-tools/perplexity2";
 import { AGENT_TOOLS_s3Store } from "@/src/lib/agent-tools/s3-store-tool";
 import { AGENT_TOOLS_database } from "@/src/lib/agent-tools/database-tool/database-tool";
+import { OrchestrationType2 } from "./orchestration/types";
 
 //let _data: any;
 
@@ -617,7 +618,7 @@ function createSummarizedHistory(
   orchestrationProps?: OrchestrationProps
 ): ServerMessage[] {
   // For agent-orchestrator mode, return the full conversation history unedited
-  if ((!orchestrationProps?.chatMode || orchestrationProps?.chatMode === 'agent-orchestrator') || (orchestrationProps && orchestrationProps.agentOrder !== "auto")) {
+  if ((!orchestrationProps?.chatMode || orchestrationProps?.chatMode === OrchestrationType2.DIRECT_AGENT_INTERACTION)) {
     return history || [];
   }
   
@@ -741,7 +742,7 @@ export async function basicAgentChat(
 
     // Check if agent is a manager type
     const isManager = agent.type === "manager";
-    const isAgentOrchestrator = orchestrationProps?.chatMode === 'agent-orchestrator';
+    const isAgentOrchestrator = orchestrationProps?.chatMode === OrchestrationType2.LLM_ROUTED_WORKFLOW || orchestrationProps?.chatMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW;
     
     // Create conversation history based on agent type and orchestration mode
     const summarizedHistory = createSummarizedHistory(messageHistory, isManager, orchestrationProps);
@@ -1017,6 +1018,8 @@ export async function basicAgentChat(
   }
 }
 
+// DEPRECATED. Now using ORCHESTRATION_load_tools
+
 export async function LOAD_TYPE_SPECIFIC_TOOLS(
   type: AgentTypeEnum,
   tools: any,
@@ -1107,7 +1110,7 @@ export async function LOAD_TYPE_SPECIFIC_TOOLS(
       };
       break;
     case AgentTypeEnum.MANAGER:
-      if (orchestrationProps && orchestrationProps.agentOrder === "auto") {
+      if (orchestrationProps && orchestrationProps?.chatMode === OrchestrationType2.LLM_ROUTED_WORKFLOW || orchestrationProps?.chatMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW) {
         _result = {
           ..._result,
           ...AGENT_TOOLS_pinecone(textChatLogs || []),
@@ -1349,9 +1352,9 @@ async function _generateDynamicPrompt(
 }
 
 const _loadPromptBasedOnOrchestrationProps = async (orchestrationProps: OrchestrationProps, contextSets: ContextContainerProps[]) => {
-  if(orchestrationProps.agentOrder === "auto") {
+  if(orchestrationProps.chatMode === OrchestrationType2.LLM_ROUTED_WORKFLOW || orchestrationProps.chatMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW) {
     if(orchestrationProps.currentAgent.type === AgentTypeEnum.MANAGER) {
-      return await AGENT_WORKFLOW_ORCHESTRATION_PROMPT.autoManager_prompt(
+      return await AGENT_WORKFLOW_ORCHESTRATION_PROMPT.managerDirected_prompt(
         orchestrationProps as OrchestrationProps,
         contextSets
       );

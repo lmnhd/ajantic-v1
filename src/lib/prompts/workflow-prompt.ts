@@ -483,7 +483,7 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
 `,
 
   // AUTO_MANAGER
-  autoManager_prompt: async (
+  managerDirected_prompt: async (
     props: OrchestrationProps,
     context?: ContextContainerProps[]
   ) => `

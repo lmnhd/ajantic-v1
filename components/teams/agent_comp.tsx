@@ -12,7 +12,7 @@ import {
   SelectValue,
   SelectGroup,
 } from "@/components/ui/select";
-import { useGlobalStore } from "@/src/lib/store/GloabalStoreState";
+import { useAnalysisStore } from "@/src/lib/store/analysis-store";
 import {
   AgentComponentProps,
   AgentType,
@@ -84,6 +84,23 @@ import AllowedContacts from "@/components/allowed-contacts"; // Placeholder
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PromptComp from "./prompt_comp";
 import { Badge } from "@/components/ui/badge";
+import { fetchCustomToolNames } from "@/src/lib/agent-tools/tool-registry/tool-metadata";
+import { getCustomToolId } from "@/src/lib/agent-tools/tool-registry/custom-tool-ref";
+
+const debugState = (tag: string, agentIndex: number, state: any) => {
+  console.group(`🔍 DEBUG [${tag}]`);
+  if (state?.currentAgents?.agents && state.currentAgents.agents[agentIndex]) {
+    console.log('Agent index:', agentIndex);
+    console.log('Agent name:', state.currentAgents.agents[agentIndex].name);
+    console.log('Model args:', state.currentAgents.agents[agentIndex].modelArgs);
+    console.log('Provider:', state.currentAgents.agents[agentIndex].modelArgs?.provider);
+    console.log('Model name:', state.currentAgents.agents[agentIndex].modelArgs?.modelName);
+  } else {
+    console.error('Agent not found in state');
+    console.log('State:', state);
+  }
+  console.groupEnd();
+};
 
 const AgentComponentField = ({
   name,
@@ -107,22 +124,18 @@ const AgentPromptsContainer: React.FC<{
   agent_index: number;
   localStateObject: AISessionState;
   setLocalStateObject: (localStateObject: AISessionState) => void;
-  // setAIMessages: (globalMessages: GlobalMessages) => void; // Likely handled by setLocalStateObject
-  // handleChangeIndex: () => void; // Likely handled by parent
   handleAutoPrompt: (data: string) => Promise<void>;
   autoPromptModel: ModelArgs;
   handleAutoPromptModelChange: (e: string) => void;
   autoPromptExtraInfo: string;
   setAutoPromptExtraInfo: (e: string) => void;
   handlePromptTextToSet: (text: string) => void;
-  handleOnBlur: (field: keyof AgentComponentProps, value: string) => void;
+  handleOnBlur: (field: keyof AgentComponentProps, value: string | boolean) => void;
 }> = ({
   system,
   agent_index,
   localStateObject,
   setLocalStateObject,
-  // setAIMessages,
-  // handleChangeIndex,
   handleAutoPrompt,
   autoPromptModel,
   handleAutoPromptModelChange,
@@ -133,7 +146,6 @@ const AgentPromptsContainer: React.FC<{
 }) => {
   const [fullscreenRef, toggleFullscreen, isFullscreen] = useFullscreen(); // Needs migration
 
-  // Helper to update agent prompts
   const updateAgentPrompts = (updateFn: (agent: AgentComponentProps) => AgentComponentProps) => {
     const newState = {
         ...localStateObject,
@@ -145,6 +157,7 @@ const AgentPromptsContainer: React.FC<{
         },
     };
     setLocalStateObject(newState);
+    setTimeout(() => useAnalysisStore.getState().saveState(), 100);
   };
 
   const newDirective = () => {
@@ -171,7 +184,6 @@ const AgentPromptsContainer: React.FC<{
   return (
     <div className="space-y-4">
       
-      {/* System Prompt */}
       <PromptComp
         localStateObject={localStateObject}
         setLocalStateObject={setLocalStateObject}
@@ -188,7 +200,6 @@ const AgentPromptsContainer: React.FC<{
         handleInputChange={ (value: string) => handleOnBlur("systemPrompt", value)}
       />
 
-      {/* Directives Section */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h4 className="text-sm font-medium text-indigo-300">Directives</h4>
@@ -233,10 +244,8 @@ const AgentPromptsContainer: React.FC<{
 export default function Agent_comp({
   agent_index,
   saveAgentState,
-  // inputChanged, // Likely unused in this specific component
   localStateObject,
   setLocalStateObject,
-  // setAIMessages, // Use setLocalStateObject instead
   storedAgentStates,
   manualLoadAgentState,
   handleAutoPrompt,
@@ -247,15 +256,13 @@ export default function Agent_comp({
   handlePromptTextToSet,
   elevenLabsVoices,
   voicesLoaded,
-  // handleChangeIndex, // Handled by parent
   refreshAgentStates,
+  isVisuallyDisabled,
 }: {
   agent_index: number;
   saveAgentState: () => void;
   localStateObject: AISessionState;
   setLocalStateObject: (localStateObject: AISessionState) => void;
-  // inputChanged: (input: string) => void;
-  // setAIMessages: (globalMessages: GlobalMessages) => void;
   storedAgentStates: {
     agents: {
       id: number;
@@ -274,67 +281,57 @@ export default function Agent_comp({
   handlePromptTextToSet: (text: string) => void;
   elevenLabsVoices: ElevenLabsVoice[];
   voicesLoaded: boolean;
-  // handleChangeIndex: () => void;
   refreshAgentStates: () => void;
+  isVisuallyDisabled?: boolean;
 }) {
   const [agentTesterPopoverOpen, setAgentTesterPopoverOpen] = useState(false);
   const [roleDescription, setRoleDescription] = useState<string>("");
   const [fullscreenRef, toggleFullscreen, isFullscreen] = useFullscreen();
   const [isKnowledgeBaseOpen, setIsKnowledgeBaseOpen] = useState(false);
-
-  // Centralized way to update agent state
-  const updateAgentState = useCallback(
-    (updateFn: (agent: AgentComponentProps) => AgentComponentProps) => {
-      const newState = {
-          ...localStateObject,
-          currentAgents: {
-              ...localStateObject.currentAgents,
-              agents: localStateObject.currentAgents.agents.map((agent, idx) =>
-                  idx === agent_index ? updateFn(agent) : agent
-              ),
-          },
-      };
-      setLocalStateObject(newState);
-    },
-    [localStateObject, agent_index, setLocalStateObject]
-  );
+  const [customToolNames, setCustomToolNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const currentAgent = localStateObject.currentAgents.agents[agent_index];
     setRoleDescription(currentAgent?.roleDescription || "");
-    // Add other state initializations if needed, e.g., for modelArgs, tools
   }, [agent_index, localStateObject]);
 
-  // Generic handler for simple field updates
-  const handleFieldUpdate = useCallback(
+  const handleDirectUpdate = useCallback(
     (field: keyof AgentComponentProps, value: any) => {
-       console.log(`Updating field ${field} for agent ${agent_index} with value:`, value);
-       updateAgentState(agent => ({ ...agent, [field]: value }));
+       console.log(`Directly updating field ${field} for agent ${agent_index} with value:`, value);
+
+       const currentAgent = localStateObject.currentAgents.agents[agent_index];
+       const updatedAgent = {
+         ...currentAgent,
+         [field]: value,
+       };
+
+       const newState = {
+         ...localStateObject,
+         currentAgents: {
+           ...localStateObject.currentAgents,
+           agents: localStateObject.currentAgents.agents.map((agent, idx) =>
+             idx === agent_index ? updatedAgent : agent
+           ),
+         },
+       };
+       setLocalStateObject(newState);
+
+       setTimeout(() => useAnalysisStore.getState().saveState(), 100);
+
        toast({
           title: "Agent Updated",
           description: `${String(field)} updated.`,
-          duration: 2000, // Shorter duration
+          duration: 1500,
        });
     },
-    [updateAgentState, toast, agent_index]
-  );
-
-  // Specific handler for modelArgs updates
-  const handleModelArgsUpdate = useCallback(
-    (argsUpdate: Partial<ModelArgs>) => {
-      updateAgentState(agent => ({
-        ...agent,
-        modelArgs: { ...(agent.modelArgs || {}), ...argsUpdate },
-      }));
-    },
-    [updateAgentState]
+    [localStateObject, agent_index, setLocalStateObject, toast]
   );
 
   const deleteAgent = () => {
     if (window.confirm("Are you sure you want to delete this agent?")) {
       const currentAgentName = localStateObject.currentAgents.agents[agent_index]?.name;
-      if (!currentAgentName) return; // Safety check
-      
+      if (!currentAgentName) return;
+
       const newState = {
         ...localStateObject,
         currentAgents: {
@@ -343,33 +340,94 @@ export default function Agent_comp({
         },
       };
       setLocalStateObject(newState);
-       toast({ title: "Agent Deleted", description: `Agent ${currentAgentName} removed.`, variant: "destructive" });
-       // Consider resetting agent index in parent if needed
+      setTimeout(() => useAnalysisStore.getState().saveState(), 100);
+      toast({ title: "Agent Deleted", description: `Agent ${currentAgentName} removed.`, variant: "destructive" });
     }
   };
 
   const handleVoiceChange = (voice: AgentVoice) => {
-    updateAgentState(agent => ({ ...agent, voice }));
+     const currentAgent = localStateObject.currentAgents.agents[agent_index];
+     const updatedAgent = {
+       ...currentAgent,
+       voice: voice,
+     };
+     const newState = {
+       ...localStateObject,
+       currentAgents: {
+         ...localStateObject.currentAgents,
+         agents: localStateObject.currentAgents.agents.map((agent, idx) =>
+           idx === agent_index ? updatedAgent : agent
+         ),
+       },
+     };
+     setLocalStateObject(newState);
+     setTimeout(() => useAnalysisStore.getState().saveState(), 100);
   };
 
-  const toggleTool = (toolName: AI_Agent_Tools) => {
-      updateAgentState(agent => {
-          const currentTools = agent.tools || [];
-          const newTools = currentTools.includes(toolName)
-              ? currentTools.filter(t => t !== toolName)
-              : [...currentTools, toolName];
-          return { ...agent, tools: newTools };
-      });
+  const toggleTool = (toolName: AI_Agent_Tools | string) => {
+      const currentAgent = localStateObject.currentAgents.agents[agent_index];
+      const currentTools = currentAgent.tools || [];
+      const newTools = currentTools.includes(toolName)
+          ? currentTools.filter(t => t !== toolName)
+          : [...currentTools, toolName];
+
+      const updatedAgent = { ...currentAgent, tools: newTools };
+
+      const newState = {
+        ...localStateObject,
+        currentAgents: {
+          ...localStateObject.currentAgents,
+          agents: localStateObject.currentAgents.agents.map((agent, idx) =>
+            idx === agent_index ? updatedAgent : agent
+          ),
+        },
+      };
+      setLocalStateObject(newState);
+      setTimeout(() => useAnalysisStore.getState().saveState(), 100);
   };
 
   const currentAgent = localStateObject.currentAgents.agents[agent_index];
 
-  // Render null or a placeholder if the agent doesn't exist (e.g., after deletion)
   if (!currentAgent) {
       return <div className="p-4 text-center text-gray-500">Agent not found.</div>;
   }
 
-  const isToolAgentType = UTILS_isToolAgent(currentAgent.type as AgentTypeEnum); // Needs migration
+  const isToolAgentType = UTILS_isToolAgent(currentAgent.type as AgentTypeEnum);
+
+  useEffect(() => {
+    async function loadCustomToolNames() {
+      const currentAgent = localStateObject.currentAgents.agents[agent_index];
+      if (!currentAgent?.tools) return;
+      
+      const customToolRefs = currentAgent.tools.filter(
+        tool => typeof tool === 'string' && tool.toString().startsWith('CUSTOM_TOOL:')
+      ) as string[];
+      
+      if (customToolRefs.length === 0) return;
+      
+      const names = await fetchCustomToolNames(customToolRefs);
+      setCustomToolNames(names);
+    }
+    
+    loadCustomToolNames();
+  }, [localStateObject.currentAgents.agents, agent_index]);
+
+  useEffect(() => {
+    if (currentAgent?.modelArgs) {
+      console.log("🔄 Model args changed:", currentAgent.modelArgs);
+      console.log("Provider:", currentAgent.modelArgs.provider);
+      console.log("Model name:", currentAgent.modelArgs.modelName);
+    }
+  }, [currentAgent?.modelArgs?.provider, currentAgent?.modelArgs?.modelName]);
+
+  const handleManualLoad = (id: number) => {
+    console.log("Loading agent with ID:", id);
+    debugState('BEFORE_LOAD', agent_index, localStateObject);
+    manualLoadAgentState(id);
+    setTimeout(() => {
+      debugState('AFTER_LOAD', agent_index, localStateObject);
+    }, 1000);
+  };
 
   return (
     <div
@@ -377,12 +435,11 @@ export default function Agent_comp({
         "flex flex-col w-full h-full overflow-y-auto rounded-lg border border-white/5",
         "bg-gradient-to-br from-slate-950/40 to-slate-900/40 backdrop-blur-md",
         "shadow-lg shadow-black/20",
-        currentAgent.disabled ? "opacity-60" : "",
-        !isToolAgentType ? "hover:shadow-indigo-900/20" : "hover:shadow-violet-900/20",
-        currentAgent.training ? "ring-2 ring-yellow-500/50" : ""
+        isVisuallyDisabled ? "opacity-60" : "",
+        currentAgent.training ? "ring-2 ring-yellow-500/50" : "",
+        !isToolAgentType ? "hover:shadow-indigo-900/20" : "hover:shadow-violet-900/20"
       )}
     >
-      {/* Status Bar */}
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-1.5 bg-black/10 border-b border-white/5">
         <div className="flex items-center space-x-2">
           <Badge variant={isToolAgentType ? "secondary" : "default"} className="text-xs">
@@ -391,11 +448,17 @@ export default function Agent_comp({
           <Badge variant={currentAgent.disabled ? "destructive" : currentAgent.training ? "outline" : "secondary"} className="text-xs">
             {currentAgent.disabled ? "Disabled" : currentAgent.training ? "Training" : "Active"}
           </Badge>
+          {isVisuallyDisabled && !currentAgent.disabled && (
+            <Badge variant="outline" className="text-xs text-gray-400 border-gray-600">Inactive</Badge>
+          )}
         </div>
-         {/* Save/Load/Delete for individual agent */}
-        <div className="flex items-center gap-1">
-            <Button variant="ghost" size="xs" onClick={saveAgentState} title="Save Agent State"><Disc2Icon className="w-3 h-3" /></Button>
-             <Select onValueChange={(e) => manualLoadAgentState(parseInt(e))}>
+         <div className="flex items-center gap-1">
+            <Button variant="ghost" size="xs" onClick={() => {
+              debugState('MANUAL_SAVE_CLICK', agent_index, localStateObject);
+              useAnalysisStore.getState().saveState(); 
+              toast({ title: "State Saved", description: "Current agent team state persisted.", duration: 1500 });
+            }} title="Save Current State"><Disc2Icon className="w-3 h-3" /></Button>
+             <Select onValueChange={(e) => handleManualLoad(parseInt(e))}>
               <SelectTrigger className="w-auto h-6 px-2 text-[10px] bg-transparent border-none text-gray-400 hover:text-white">
                 <SelectValue placeholder="Load" />
               </SelectTrigger>
@@ -412,9 +475,7 @@ export default function Agent_comp({
             </Select>
             <Button variant="ghost" size="xs" onClick={deleteAgent} title="Delete Agent" className="text-red-400 hover:text-red-300"><Trash2Icon className="w-3 h-3" /></Button>
         </div>
-      </div>
-
-      {/* Main Content Area with Tabs */}
+      </div> 
       <div className="flex-grow p-3 overflow-y-auto">
         <Tabs defaultValue="basic" className="w-full">
           <TabsList className="grid grid-cols-3 sm:grid-cols-6 gap-1 mb-3 bg-black/10 p-1 h-auto">
@@ -426,12 +487,11 @@ export default function Agent_comp({
             {isToolAgentType && <TabsTrigger value="tools" className="h-6 px-1.5 text-[10px] data-[state=active]:bg-slate-800"><AxeIcon className="w-3 h-3 mr-1" />Tools</TabsTrigger>}
           </TabsList>
 
-          {/* Basic Info Tab */}
           <TabsContent value="basic" className="space-y-3">
              <AgentComponentField name="Type">
                  <Select
                   defaultValue={currentAgent.type}
-                  onValueChange={(e) => handleFieldUpdate("type", e)}
+                  onValueChange={(e) => handleDirectUpdate("type", e)}
                 >
                   <SelectTrigger className="w-full bg-slate-900/50 border-white/5 text-xs">
                     <SelectValue placeholder="Select Agent Type" />
@@ -449,7 +509,7 @@ export default function Agent_comp({
                  <Input
                   className="w-full bg-slate-900/50 border-white/5 text-xs"
                   defaultValue={currentAgent.name}
-                  onBlur={(e) => handleFieldUpdate("name", e.target.value)}
+                  onBlur={(e) => handleDirectUpdate("name", e.target.value)}
                 />
             </AgentComponentField>
             <AgentComponentField name="Title">
@@ -457,7 +517,7 @@ export default function Agent_comp({
                   className="w-full bg-slate-900/50 border-white/5 text-xs"
                   placeholder="ex. Lead Researcher"
                   defaultValue={currentAgent.title}
-                  onBlur={(e) => handleFieldUpdate("title", e.target.value)}
+                  onBlur={(e) => handleDirectUpdate("title", e.target.value)}
                 />
             </AgentComponentField>
             <AgentComponentField name="Role Desc">
@@ -466,28 +526,80 @@ export default function Agent_comp({
                   placeholder="ex. Finds information, analyzes data..."
                   defaultValue={currentAgent.roleDescription}
                   rows={3}
-                  onBlur={(e) => handleFieldUpdate("roleDescription", e.target.value)}
+                  onBlur={(e) => handleDirectUpdate("roleDescription", e.target.value)}
                 />
             </AgentComponentField>
           </TabsContent>
 
-           {/* Model Tab */}
-          <TabsContent value="model">
+           <TabsContent value="model">
               <ModelProviderSelect
-                localState={localStateObject} // Pass full state if needed by component
-                setLocalState={setLocalStateObject} // Pass state setter
+                localState={localStateObject}
                 model={currentAgent.modelArgs}
-                index={agent_index} // Pass index to identify agent
-                modelNameChanged={(modelName) => handleModelArgsUpdate({ modelName: modelName as ModelNames })}
-                modelProviderChanged={(provider) => {
-                  const newModelName = UTILS_updateModelNameAfterProviderChange(provider as ModelProviderEnum); // Needs migration
-                  handleModelArgsUpdate({ provider: provider as ModelProviderEnum, modelName: newModelName as ModelNames });
+                index={agent_index}
+                modelNameChanged={(modelName) => {
+                  console.log("Model name changing to:", modelName);
+                  const updatedAgent = {
+                    ...currentAgent,
+                    modelArgs: { ...(currentAgent.modelArgs || {}), modelName: modelName as ModelNames },
+                  };
+                  const newState = {
+                    ...localStateObject,
+                    currentAgents: {
+                      ...localStateObject.currentAgents,
+                      agents: localStateObject.currentAgents.agents.map((agent, idx) =>
+                        idx === agent_index ? updatedAgent : agent
+                      ),
+                    },
+                  };
+                  setLocalStateObject(newState);
+                  setTimeout(() => useAnalysisStore.getState().saveState(), 100);
+                  toast({ title: "Model Name Updated", duration: 1500 });
                 }}
-                temperatureChanged={(temp) => handleModelArgsUpdate({ temperature: temp })}
+                modelProviderChanged={(provider) => {
+                  console.log("Provider changing to:", provider);
+                  const newModelName = UTILS_updateModelNameAfterProviderChange(provider as ModelProviderEnum);
+                  const updatedAgent = {
+                    ...currentAgent,
+                    modelArgs: {
+                      ...(currentAgent.modelArgs || {}),
+                      provider: provider as ModelProviderEnum,
+                      modelName: newModelName as ModelNames
+                    },
+                  };
+                  const newState = {
+                    ...localStateObject,
+                    currentAgents: {
+                      ...localStateObject.currentAgents,
+                      agents: localStateObject.currentAgents.agents.map((agent, idx) =>
+                        idx === agent_index ? updatedAgent : agent
+                      ),
+                    },
+                  };
+                  setLocalStateObject(newState);
+                  setTimeout(() => useAnalysisStore.getState().saveState(), 100);
+                  toast({ title: "Model Provider Updated", duration: 1500 });
+                }}
+                temperatureChanged={(temp) => {
+                   const updatedAgent = {
+                    ...currentAgent,
+                    modelArgs: { ...(currentAgent.modelArgs || {}), temperature: temp },
+                  };
+                  const newState = {
+                    ...localStateObject,
+                    currentAgents: {
+                      ...localStateObject.currentAgents,
+                      agents: localStateObject.currentAgents.agents.map((agent, idx) =>
+                        idx === agent_index ? updatedAgent : agent
+                      ),
+                    },
+                  };
+                  setLocalStateObject(newState);
+                  setTimeout(() => useAnalysisStore.getState().saveState(), 100);
+                  toast({ title: "Temperature Updated", duration: 1500 });
+                }}
               />
           </TabsContent>
 
-          {/* Voice Tab */}
           <TabsContent value="voice">
               <AgentVoiceSelect
                 onChange={handleVoiceChange}
@@ -498,26 +610,22 @@ export default function Agent_comp({
               />
           </TabsContent>
 
-          {/* Prompts Tab */}
           <TabsContent value="prompts">
               <AgentPromptsContainer
                 system={currentAgent.systemPrompt as string}
                 agent_index={agent_index}
                 localStateObject={localStateObject}
                 setLocalStateObject={setLocalStateObject}
-                // setAIMessages={setAIMessages} // Removed
-                // handleChangeIndex={handleChangeIndex} // Removed
                 handleAutoPrompt={handleAutoPrompt}
                 autoPromptModel={autoPromptModel}
                 handleAutoPromptModelChange={handleAutoPromptModelChange}
                 autoPromptExtraInfo={autoPromptExtraInfo}
                 setAutoPromptExtraInfo={setAutoPromptExtraInfo}
                 handlePromptTextToSet={handlePromptTextToSet}
-                handleOnBlur={(field, value) => handleFieldUpdate(field, value)} // Use generic handler
+                handleOnBlur={handleDirectUpdate}
               />
           </TabsContent>
 
-          {/* Memory Tab */}
           <TabsContent value="memory" className="space-y-3">
              <AgentComponentField name="Stored Info">
                  <Popover>
@@ -553,7 +661,7 @@ export default function Agent_comp({
                         agentName={currentAgent.name}
                         userId={localStateObject.userId}
                         onKnowledgeBaseUpdate={() => console.log("KB Updated")}
-                        setHasKnowledgeBase={(val: boolean) => handleFieldUpdate("hasKnowledgeBase", val)}
+                        setHasKnowledgeBase={(val: boolean) => handleDirectUpdate("hasKnowledgeBase", val)}
                         autoKBArgs={{
                           agentTitle: currentAgent.title,
                           agentRole: currentAgent.roleDescription,
@@ -576,12 +684,14 @@ export default function Agent_comp({
             </AgentComponentField>
           </TabsContent>
 
-          {/* Tools Tab (Conditional) */}
           {isToolAgentType && (
             <TabsContent value="tools">
                 <div className="space-y-1">
+                    <div className="mb-2 border-b border-white/10 pb-1">
+                      <h4 className="text-xs font-medium text-slate-300">Standard Tools</h4>
+                    </div>
                     {Object.values(AI_Agent_Tools)
-                      .filter(tool => tool !== AI_Agent_Tools.AGENT_GLOBAL_STATE) // Exclude internal tool
+                      .filter(tool => tool !== AI_Agent_Tools.AGENT_GLOBAL_STATE)
                       .map((tool) => (
                         <Button
                             key={tool}
@@ -594,8 +704,31 @@ export default function Agent_comp({
                            {currentAgent.tools?.includes(tool) && <span className="ml-auto text-green-400">✓</span>}
                         </Button>
                     ))}
+                    
+                    {currentAgent.tools?.some(tool => typeof tool === 'string' && tool.startsWith('CUSTOM_TOOL:')) && (
+                      <>
+                        <div className="mt-4 mb-2 border-b border-white/10 pb-1">
+                          <h4 className="text-xs font-medium text-slate-300">Custom Tools</h4>
+                        </div>
+                        {currentAgent.tools
+                          .filter(tool => typeof tool === 'string' && tool.startsWith('CUSTOM_TOOL:'))
+                          .map((toolRef) => (
+                            <Button
+                              key={toolRef}
+                              variant="secondary"
+                              size="xs"
+                              onClick={() => toggleTool(toolRef)}
+                              className="w-full justify-start text-left"
+                            >
+                              {customToolNames[toolRef as string] || 
+                                (typeof toolRef === 'string' ? `Custom: ${toolRef.split(':')[1] || toolRef}` : String(toolRef))}
+                              <span className="ml-auto text-green-400">✓</span>
+                            </Button>
+                          ))
+                        }
+                      </>
+                    )}
                 </div>
-                {/* OAuth Panel (Conditional) */}
                 {currentAgent.tools?.includes(AI_Agent_Tools.OAUTH_PROVIDER) && (
                     <div className="mt-4 border-t border-white/10 pt-3">
                     <Label className="text-xs font-medium text-slate-300 mb-1 block">OAuth Configuration</Label>

@@ -93,18 +93,21 @@ async function generateResearchQueries(responsibilities: string[], agentTitle: s
   4. Latest developments and trends
   5. Important tools and technologies
   
-  Format each query to get detailed, factual information.`;
+  Format each query to get detailed, factual information.
+  
+  IMPORTANT: Limit your response to a MAXIMUM of 3 queries total. Focus only on the most critical knowledge areas.`;
 
   const response = await generateObject({
     model: await MODEL_getModel_ai(MODEL_CONFIG.KNOWLEDGE_BASE),
-    system: "You are a research planning expert. Generate specific, targeted research queries.",
+    system: "You are a research planning expert. Generate specific, targeted research queries. Be highly selective and prioritize only the most essential topics.",
     prompt,
     schema: z.object({
-        queries: z.array(z.string())
+        queries: z.array(z.string()).max(3)
     })
   });
 
-  return response.object.queries;
+  // Ensure we never have more than 3 queries regardless of model output
+  return response.object.queries.slice(0, 3);
 }
 
 async function gatherResearch(query: string): Promise<ResearchResult[]> {

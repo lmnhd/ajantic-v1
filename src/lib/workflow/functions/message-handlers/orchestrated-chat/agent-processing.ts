@@ -7,6 +7,7 @@ import { ORCHESTRATION_PAUSE_clearContinueFlag, ORCHESTRATION_PAUSE_continueChat
 import { isChatCancelled, clearCancellationFlag } from './cancel-chat';
 import { setCurrentActiveAgent } from './initialize-state';
 import { AnalysisState } from '../../../../store/analysis-store';
+import { OrchestrationType2 } from '@/src/lib/orchestration/types';
 
 /**
  * Processes a single agent's turn in the orchestration sequence
@@ -42,7 +43,7 @@ export async function processSingleAgentTurn(
     handleOrchestrationPause(props);
     
     // Set current agent and update UI
-    let currentAgent = props.agentOrder === "auto" ? props.currentAgent : currentAgents[props.currentCycleStep];
+    let currentAgent = (props.chatMode === OrchestrationType2.LLM_ROUTED_WORKFLOW || props.chatMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW) ? props.currentAgent : currentAgents[props.currentCycleStep];
     props.currentAgent = currentAgent;
     props.extras!.hasKnowledgeBase = currentAgent.hasKnowledgeBase || false;
     props.isThinkingModel = THINKING_MODELS.includes(currentAgent.modelArgs.modelName as string);

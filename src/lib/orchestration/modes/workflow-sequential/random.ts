@@ -72,7 +72,7 @@ function shuffleArray<T>(array: T[]): T[] {
 export async function ORCHESTRATION_runRandomWorkflow(
     initialState: OrchestrationState,
     sessionState: AISessionState,
-    memStore: MemoryVectorStore
+    
 ): Promise<OrchestrationFinalResult> {
     let orchState = { ...initialState };
     orchState.status = "running";
@@ -144,19 +144,23 @@ export async function ORCHESTRATION_runRandomWorkflow(
                 };
 
                 // Use the real execution function
-                const turnResult = await ORCHESTRATION_executeAgentTurn(turnInput, sessionState, orchState.config, memStore);
+                const turnResult = await ORCHESTRATION_executeAgentTurn(turnInput, sessionState, orchState.config);
                 logger.log(`Agent ${turnResult.agentName} completed turn.`);
 
                 const agentResponseMessage: ServerMessage = {
                     role: "assistant",
                     content: turnResult.response,
                     agentName: turnResult.agentName,
+                    agentDirectives: turnResult.agentDirectives,
+                    expectedOutput: turnResult.agentDirectives?.expectedOutput
                 };
                 orchState.conversationHistory = [...orchState.conversationHistory, agentResponseMessage];
 
-                if (turnResult.updatedContextSets) {
+                // With the switch to generateText for agent turns, context updates will be rare
+                // Only manager agents would modify context through generateObject
+                if (turnResult.contextModified && turnResult.updatedContextSets) {
                     orchState.contextSets = turnResult.updatedContextSets;
-                    logger.log("Context sets updated.");
+                    logger.log("Context sets updated by manager agent.");
                 }
             }
 

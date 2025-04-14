@@ -1,5 +1,6 @@
 import { AnalysisState } from '../../../../store/analysis-store';
-import { AgentComponentProps, AISessionState, ContextContainerProps, OrchestrationProps, OrchestrationType, ServerMessage } from '@/src/lib/types';
+import { AgentComponentProps, AISessionState, ContextContainerProps, OrchestrationProps, ServerMessage } from '@/src/lib/types';
+import { OrchestrationType2 } from '@/src/lib/orchestration/types/base';
 import { logger } from '@/src/lib/logger';
 
 /**
@@ -90,8 +91,8 @@ export async function setCurrentActiveAgent(
  * Creates the orchestration props object that controls flow
  */
 export function createOrchestrationProps(
-  chatMode: OrchestrationType,
-  order: "sequential" | "seq-reverse" | "random" | "auto",
+  chatMode: OrchestrationType2,
+  order: "sequential" | "seq-reverse" | "random",
   agents: AgentComponentProps[],
   currentAgent: AgentComponentProps,
   initialMessage: string,
@@ -131,7 +132,6 @@ export function createOrchestrationProps(
       allAvailableAgents: agents,
       currentMessageRewritten: "",
       taskCompletionQuery: "",
-    
     },
     teamObjective: teamObjective
   };

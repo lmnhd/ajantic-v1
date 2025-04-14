@@ -10,7 +10,7 @@ import { createExecuteFunctionForLoading, getAgentToolsRegistry } from "./auto-g
 // Interface for tool parameter definition (Client-safe)
 export interface ToolParameter {
   name: string;
-  type: "string" | "number" | "boolean" | "array" | "object";
+  type: string;
   description: string;
   required?: boolean;
   default?: any;
@@ -23,6 +23,17 @@ export interface CustomToolDefinition {
   parameters: ToolParameter[];
   functionBody: string; // Note: Body is here but execution is server-side
   category?: string;
+  
+  // New fields for registry integration
+  id?: string;
+  implementation?: string;
+  implementationType?: string;
+  metadata?: {
+    agentId?: string;
+    userId?: string;
+    [key: string]: any;
+  };
+  version?: number;
 }
 
 // Removed: UTILS_generateDynamicTool
@@ -116,7 +127,7 @@ export const UTILS_registerDynamicTool = async (
   agentName: string,
   toolName: string,
   toolFunction: any
-): void => {
+): Promise<void> => {
   logger.tool("Tool Generator - Registering Tool", {
     agentName,
     toolName

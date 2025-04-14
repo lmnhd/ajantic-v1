@@ -24,6 +24,7 @@ import { PostMessageAnalysisProps } from "./analysis_server";
 // import { DeepSeekModelNames } from "@/src/app/api/model/deepseek";
 // import { DynamicFormSchema } from "./research-analysis/post-message-analysis/form-creator-core";
 // import { BedrockModelNames } from "@/src/app/api/model/bedrock";
+import { OrchestrationType2 } from "./orchestration/types/base";
 
 export type Top100Songs = {
   title: string;
@@ -190,6 +191,13 @@ export type AISessionState = {
   newSeeds: boolean;
   currentSeedLine?: string;
   genericData?: any;
+  orchestrationSettings?: {
+    agentOrder: "sequential" | "seq-reverse" | "random";
+    rounds: number;
+    maxRounds: number;
+    orchestrationMode: OrchestrationType2;
+    customAgentSet: string[];
+  };
 };
 export type UpdateStateProps = {
   role?:
@@ -258,6 +266,7 @@ export enum AI_Agent_Tools {
   DATABASE = "DATABASE",
   DOCUMENT_PROCESSOR = "DOCUMENT_PROCESSOR",
   VIDEO_GEN = "VIDEO_GEN",
+  CUSTOM_TOOL = "CUSTOM_TOOL"
 }
 
 export type AI_Agent_ToolsDescription = {
@@ -321,6 +330,7 @@ export type Team = {
   objectives: string;
   agents: AgentComponentProps[];
   contextSets?: ContextContainerProps[];
+  orchestrationType?: OrchestrationType2;
 };
 type AgentChatResponse = {
   message: string;
@@ -352,7 +362,6 @@ export type AgentComponentProps = {
     | AIMessage[]
     | HumanMessage[];
   tools?: AI_Agent_Tools[] | string[];
-  customTools?: Record<string, any>; // Dictionary of custom tools
   voice?: AgentVoice;
   promptDirectives?: string[];
   seName?: (title: string) => void;
@@ -642,7 +651,27 @@ export type ServerMessage = {
   agentName?: string;
   contextSet?: ContextSet;
   conversationLevel?: number;
-};
+  expectedOutput?: {
+    criteria: string;
+    format?: string;
+    requiredElements?: string[];
+    validationStrategy?: "exact" | "semantic" | "contains" | "custom" | "simple";
+  };
+  agentDirectives?: {
+    messageTo: string;
+    message: string;
+    workflowComplete: boolean;
+    contextUpdates: boolean;
+    isInfoRequest: boolean;
+    contextSetUpdate?: {
+      contextSets: Array<{
+        newOrUpdate: "new" | "update";
+        name: string;
+        context: string;
+      }>;
+    };
+  };
+}
 
 export interface AppFrozenState {
   localState: AISessionState;
@@ -659,7 +688,7 @@ export interface AppFrozenState {
     agentOrder: "sequential" | "seq-reverse" | "random";
     rounds: number;
     maxRounds: number;
-    orchestrationMode: OrchestrationType;
+    orchestrationMode: OrchestrationType2;
     customAgentSet: string[];
   };
 }
@@ -723,8 +752,8 @@ export type OrchestrationType =
   | "wf-sequential-3";
 
 export type OrchestrationProps = {
-  agentOrder: "sequential" | "seq-reverse" | "random" | "auto";
-  chatMode: OrchestrationType;
+  agentOrder: "sequential" | "seq-reverse" | "random";
+  chatMode: OrchestrationType2;
   numRounds: number;
   numAgents: number;
   currentAgent: AgentComponentProps;

@@ -72,6 +72,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/src/lib/utils";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types/base";
 
 // Component to recursively display nested sub-messages
 const SubMessageAccordion = ({
@@ -160,35 +161,37 @@ const TopLevelSubMessages = ({ message }: { message: ServerMessage }) => {
   );
 };
 
+interface AJMessageComponentProps {
+  messages: ServerMessage[];
+  setMessages: (messages: ServerMessage[]) => void;
+  clearMessages?: () => void;
+  conversationHistory?: { id: number; dayName: string }[];
+  setConversationHistory?: (dayName: string) => void;
+  userId: string;
+  conversationHistoryNames?: string[];
+  promptTextToSet?: (text: string) => void;
+  agentIndex?: number;
+  isFullscreen?: boolean;
+  orchestrationMode?: OrchestrationType2;
+  className?: string;
+}
+
 export default function AJMessageComponent({
   messages,
   setMessages,
-  setConversationHistory, // May need adjustment depending on store implementation
-  conversationHistory, // From store
+  clearMessages,
+  conversationHistory,
+  setConversationHistory,
   userId,
-  conversationHistoryNames, // Added conversationHistoryNames to props
-  promptTextToSet, // To be connected to context set logic
-  agentIndex, // Current agent index from store
-  clearMessages = () => {},
+  conversationHistoryNames,
+  promptTextToSet,
+  agentIndex,
+  className,
   isFullscreen = false,
   // freeFlowMessages = false, // Replaced by orchestrationMode
-  className = "",
-  orchestrationMode = "agent-orchestrator", // From store
-}: {
-  messages: ServerMessage[];
-  setMessages: (messages: ServerMessage[]) => void;
-  setConversationHistory: (dayName: string) => void; // Function to load history
-  conversationHistory: { id: number; dayName: string }[];
-  userId: string;
-  conversationHistoryNames: string[];
-  promptTextToSet: (text: string) => void;
-  agentIndex?: number;
-  clearMessages?: () => void;
-  isFullscreen?: boolean;
-  // freeFlowMessages?: boolean;
-  className?: string;
-  orchestrationMode?: OrchestrationType;
-}) {
+  // teamChat = false, // No longer used directly
+  orchestrationMode = OrchestrationType2.DIRECT_AGENT_INTERACTION, // From store
+}: AJMessageComponentProps) {
   const [messageHistoryIndex, setMessageHistoryIndex] = useState<number>(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedDayName, setSelectedDayName] = useState<string | undefined>(undefined);
@@ -196,7 +199,7 @@ export default function AJMessageComponent({
   const { appState } = useGlobalStore(); // Removed setAppState if not used
 
   useEffect(() => {
-    if (messageHistoryIndex >= 0 && messageHistoryIndex < conversationHistory.length) {
+    if (messageHistoryIndex >= 0 && conversationHistory && messageHistoryIndex < conversationHistory.length) {
       setSelectedDayName(conversationHistory[messageHistoryIndex].dayName);
     } else {
       setSelectedDayName(undefined);
@@ -209,7 +212,7 @@ export default function AJMessageComponent({
       if (!id) return;
 
       const targetId = parseInt(id);
-      const newIndex = conversationHistory.findIndex(conv => conv.id === targetId);
+      const newIndex = conversationHistory?.findIndex(conv => conv.id === targetId) ?? -1;
 
       if (newIndex === -1) {
         console.error("Conversation ID not found in history:", targetId);
@@ -246,7 +249,9 @@ export default function AJMessageComponent({
         setSelectedDayName(dayName);
         setIsLoading(true);
         try {
-            await setConversationHistory(dayName); // Trigger store action
+            if (setConversationHistory) {
+                await setConversationHistory(dayName); // Trigger store action
+            }
             setMessageHistoryIndex(-1);
         } catch (error) {
             console.error("Error loading history:", error);
@@ -260,9 +265,9 @@ export default function AJMessageComponent({
 
   // History navigation
   const incrementMessageHistoryIndex = () => {
-    if (messageHistoryIndex < conversationHistory.length - 1) {
+    if (messageHistoryIndex < (conversationHistory?.length ?? 0) - 1) {
       const nextIndex = messageHistoryIndex + 1;
-      handleLoadConversation(conversationHistory[nextIndex].id.toString());
+      handleLoadConversation(conversationHistory?.[nextIndex]?.id.toString() ?? "");
     }
   };
 
@@ -270,7 +275,7 @@ export default function AJMessageComponent({
     if (messageHistoryIndex >= 0) {
       const prevIndex = messageHistoryIndex - 1;
       if (prevIndex >= 0) {
-        handleLoadConversation(conversationHistory[prevIndex].id.toString());
+        handleLoadConversation(conversationHistory?.[prevIndex]?.id.toString() ?? "");
       } else {
         setMessageHistoryIndex(-1);
       }
@@ -305,14 +310,14 @@ export default function AJMessageComponent({
             )}
             <Select
                 onValueChange={handleLoadConversation}
-                value={messageHistoryIndex >= 0 ? conversationHistory[messageHistoryIndex]?.id.toString() : ""}
+                value={messageHistoryIndex >= 0 ? conversationHistory?.[messageHistoryIndex]?.id.toString() ?? "" : ""}
                 disabled={isLoading}
               >
                 <SelectTrigger className="w-full text-xs bg-gray-800/30 h-8">
                   <SelectValue placeholder="Load Conversation" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 text-gray-200 border-gray-600">
-                     {conversationHistory.map((hist, i) => (
+                     {conversationHistory?.map((hist, i) => (
                         <SelectItem key={hist.id} value={hist.id.toString()} className="text-xs">
                             {hist.dayName} (ID: {hist.id})
                         </SelectItem>
@@ -335,7 +340,7 @@ export default function AJMessageComponent({
                 size="sm"
                 className="flex-1 h-8 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800/50"
                 onClick={incrementMessageHistoryIndex}
-                disabled={messageHistoryIndex >= conversationHistory.length - 1 || isLoading}
+                disabled={messageHistoryIndex >= (conversationHistory?.length ?? 0) - 1 || isLoading}
               >
                 <ArrowDownWideNarrowIcon className="w-3 h-3" />
               </Button>
@@ -391,7 +396,7 @@ export default function AJMessageComponent({
               setMessages={setMessages}
               agentIndex={agentIndex ?? 0}
               userId={userId}
-              promptTextToSet={promptTextToSet}
+              promptTextToSet={promptTextToSet ?? (() => {})}
             />
 
             <div className="flex items-center gap-2">

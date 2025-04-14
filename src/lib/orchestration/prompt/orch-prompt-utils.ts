@@ -1,7 +1,8 @@
 import { generateObject } from "ai";
 import { ContextContainerProps, ModelProviderEnum, OrchestrationProps, ServerMessage } from "../../types";
 import { MODEL_JSON, UTILS_convertLineSetsToContext, UTILS_getModelArgsByName, UTILS_getModelsJSON } from "../../utils";
-import { OrchestrationPromptContext, OrchestrationType2 } from "../types";
+import { OrchestrationType2 } from "../types/base";
+import { OrchestrationPromptContext } from "../types/prompt";
 import { MODEL_getModel_ai } from "../../vercelAI-model-switcher";
 import { AnthropicModelNames } from "@/src/app/api/model/anthropic";
 import { OpenAIModelNames } from "@/src/app/api/model/openai";
@@ -11,8 +12,8 @@ export const ORCH_PROMPT_UTILS_OPC_to_props = (opc: OrchestrationPromptContext):
     const props: OrchestrationProps = {
         currentAgent: opc.currentAgent,
         allAgents: opc.allAgents,
-        agentOrder: ORCH_PROMPT_UTILS_devise_agent_order(opc),
-        chatMode: opc.orchestrationType === OrchestrationType2.DIRECT_AGENT_INTERACTION ? "agent-orchestrator" : "wf-sequential-1",
+        agentOrder: opc.agentOrder,
+        chatMode: opc.orchestrationType,
         currentCycleStep: opc.currentCycleStep,
         currentRound: opc.currentRound,
         currentStepResponseType: 'initial-thought',
@@ -38,12 +39,18 @@ export const ORCH_PROMPT_UTILS_OPC_to_props = (opc: OrchestrationPromptContext):
     return props;
 }
 
-export const ORCH_PROMPT_UTILS_devise_agent_order = (opc: OrchestrationPromptContext): "sequential" | "seq-reverse" | "random" | "auto"  => {
+export const ORCH_PROMPT_UTILS_devise_agent_order = (opc: OrchestrationPromptContext): "sequential" | "seq-reverse" | "random" => {
+    // If agentOrder is explicitly provided in context, use it
+    if (opc.agentOrder) {
+        return opc.agentOrder;
+    }
+    
+    // Otherwise derive it from orchestration type
     switch (opc.orchestrationType) {
         case OrchestrationType2.LLM_ROUTED_WORKFLOW:
-            return "auto";
+            return "sequential";
         case OrchestrationType2.MANAGER_DIRECTED_WORKFLOW:
-            return "auto";
+            return "sequential";
         case OrchestrationType2.DIRECT_AGENT_INTERACTION:
             return "sequential";
         case OrchestrationType2.SEQUENTIAL_WORKFLOW:
@@ -53,8 +60,7 @@ export const ORCH_PROMPT_UTILS_devise_agent_order = (opc: OrchestrationPromptCon
         case OrchestrationType2.RANDOM_WORKFLOW:
             return "random";
         default:
-            return "auto";
-
+            return "sequential";
     }
 }
 

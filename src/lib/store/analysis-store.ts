@@ -10,8 +10,8 @@ import {
   AgentComponentProps,
   ContextContainerProps,
   ContextSet,
-  OrchestrationType,
 } from "@/src/lib/types";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types/base";
 import { GeneralPurpose } from "@prisma/client";
 import { SERVER_getAgentsAndTeams } from "@/src/lib/server2";
 import {
@@ -71,21 +71,68 @@ import { handleOrchestratedChatSubmit } from "../workflow/functions/message-hand
 import { APP_FROZEN_getById } from "@/src/lib/app-frozen";
 import { AutoGenWorkflowProps, TEAM_autogen_create_workflow } from "@/src/lib/autogen/autogen";
 
+// Helper function to calculate agent disabled states based on orchestration settings
+const updateAgentDisabledStates = (
+  agents: AgentComponentProps[],
+  orchestrationMode: OrchestrationType2,
+  customAgentSet: string[]
+) => {
+  const isDirectMode = orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION;
+  const hasCustomSet = customAgentSet && customAgentSet.length > 0;
+  
+  return agents.map(agent => {
+    let calculatedDisabled = false;
+    
+    if (!isDirectMode) {
+      const isSequentialType = [
+        OrchestrationType2.SEQUENTIAL_WORKFLOW,
+        OrchestrationType2.REVERSE_WORKFLOW,
+        OrchestrationType2.RANDOM_WORKFLOW
+      ].includes(orchestrationMode);
+      
+      const isAdvancedType = [
+        OrchestrationType2.LLM_ROUTED_WORKFLOW,
+        OrchestrationType2.MANAGER_DIRECTED_WORKFLOW
+      ].includes(orchestrationMode);
+      
+      const isManager = agent.type === AgentTypeEnum.MANAGER;
+      const isInCustomSet = hasCustomSet && customAgentSet.includes(agent.name);
+      
+      if (isSequentialType) {
+        if (hasCustomSet) {
+          calculatedDisabled = isManager || !isInCustomSet;
+        } else {
+          calculatedDisabled = isManager;
+        }
+      } else if (isAdvancedType) {
+        if (hasCustomSet) {
+          calculatedDisabled = !isManager && !isInCustomSet;
+        }
+      }
+    }
+    
+    return {
+      ...agent,
+      disabled: calculatedDisabled
+    };
+  });
+};
+
 export interface AnalysisState {
   // Core state
   localState: AISessionState;
   setLocalState: (state: AISessionState) => void;
 
   // Agent orchestration state
-  agentOrder: "sequential" | "seq-reverse" | "random" | "auto";
+  agentOrder: "sequential" | "seq-reverse" | "random";
   rounds: number;
   maxRounds: number;
-  orchestrationMode: OrchestrationType;
+  orchestrationMode: OrchestrationType2;
   customAgentSet: string[];
-  setAgentOrder: (order: "sequential" | "seq-reverse" | "random" | "auto") => void;
+  setAgentOrder: (order: "sequential" | "seq-reverse" | "random") => void;
   setRounds: (rounds: number) => void;
   setMaxRounds: (maxRounds: number) => void;
-  setOrchestrationMode: (mode: OrchestrationType) => void;
+  setOrchestrationMode: (mode: OrchestrationType2) => void;
   setCustomAgentSet: (agents: string[]) => void;
 
   contextSet: ContextSet;
@@ -130,6 +177,9 @@ export interface AnalysisState {
   handleClearMessages: () => void;
   setMessageHistory: (dayName: string) => void;
 
+  // Context operations
+  setContextSet: (contextSet: ContextSet) => void;
+
   // Actions
   setCurrentAgentIndex: (index: number) => void;
   handlePromptTextToSet: (text: string) => void;
@@ -144,10 +194,10 @@ export interface AnalysisState {
   deleteTextFromSet: (text: string) => void;
   handleAgentChatSubmit: (e: any) => Promise<void>;
   handleOrchestratedChatSubmit: (
-    chatMode: OrchestrationType,
+    orchType: OrchestrationType2,
     numRounds: number,
     maxRounds: number,
-    order: "sequential" | "seq-reverse" | "random" | "auto",
+    order: "sequential" | "seq-reverse" | "random",
     customAgentSet?: string[]
   ) => Promise<void>;
   refreshAgentStates: () => void;
@@ -180,7 +230,7 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
   agentOrder: "sequential",
   rounds: 1,
   maxRounds: 10,
-  orchestrationMode: "agent-orchestrator",
+  orchestrationMode: OrchestrationType2.DIRECT_AGENT_INTERACTION,
   customAgentSet: [],
   setAgentOrder: (order) => {
     set({ agentOrder: order });
@@ -195,11 +245,45 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
     setTimeout(() => get().saveState(), 1000);
   },
   setOrchestrationMode: (mode) => {
-    set({ orchestrationMode: mode });
+    const state = get();
+    const updatedAgents = updateAgentDisabledStates(
+      state.localState.currentAgents.agents,
+      mode,
+      state.customAgentSet
+    );
+    
+    set({ 
+      orchestrationMode: mode,
+      localState: {
+        ...state.localState,
+        currentAgents: {
+          ...state.localState.currentAgents,
+          agents: updatedAgents
+        }
+      }
+    });
+    
     setTimeout(() => get().saveState(), 1000);
   },
   setCustomAgentSet: (agents) => {
-    set({ customAgentSet: agents });
+    const state = get();
+    const updatedAgents = updateAgentDisabledStates(
+      state.localState.currentAgents.agents,
+      state.orchestrationMode,
+      agents
+    );
+    
+    set({ 
+      customAgentSet: agents,
+      localState: {
+        ...state.localState,
+        currentAgents: {
+          ...state.localState.currentAgents,
+          agents: updatedAgents
+        }
+      }
+    });
+    
     setTimeout(() => get().saveState(), 1000);
   },
 
@@ -246,9 +330,19 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
         id: _daysConvos[_daysConvos.length - 1].id,
       })) || "{}"
     );
+    
+    // Get current orchestration settings before updating state
+    const state = get();
+    
     set({
       converationsForDay: _daysConvos,
       currentConversation: _currentConvo,
+      // Preserve orchestration settings
+      agentOrder: state.agentOrder,
+      rounds: state.rounds,
+      maxRounds: state.maxRounds,
+      orchestrationMode: state.orchestrationMode,
+      customAgentSet: state.customAgentSet
     });
   },
 
@@ -258,22 +352,8 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
   megaLoadStateFromBrowserOrServer: async () => {
     await megaLoadStateFromBrowserOrServer(get, set);
     
-    // After loading other state data, also check for orchestration settings
-    const savedOrchestrationSettings = localStorage.getItem('orchestrationSettings');
-    if (savedOrchestrationSettings) {
-      try {
-        const parsedSettings = JSON.parse(savedOrchestrationSettings);
-        set({
-          orchestrationMode: parsedSettings.orchestrationMode || "agent-orchestrator",
-          agentOrder: parsedSettings.agentOrder || "sequential",
-          rounds: parsedSettings.rounds || 1,
-          maxRounds: parsedSettings.maxRounds || 10,
-          customAgentSet: parsedSettings.customAgentSet || []
-        });
-      } catch (error) {
-        console.error("Failed to parse saved orchestration settings", error);
-      }
-    }
+    // REMOVED: No longer need to check localStorage since orchestration settings 
+    // are now properly saved directly in IndexedDB within the AISessionState
   },
   updateLocalState: (state: Partial<AISessionState>) =>
     updateLocalState(state, get, set),
@@ -310,10 +390,10 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
   handleAgentChatSubmit: async (e: any) =>
     await handleAgentChatSubmit(e, get, set),
   handleOrchestratedChatSubmit: async (
-    chatMode: OrchestrationType,
-    numRounds: number, // 0 means unlimited rounds up to maxRounds - will stop when a natural conclusion is reached
-    maxRounds: number = 10, // Only has effect if numRounds is 0
-    order: "sequential" | "seq-reverse" | "random" | "auto" = "sequential",
+    orchType: OrchestrationType2,
+    numRounds: number, 
+    maxRounds: number = 10,
+    order: "sequential" | "seq-reverse" | "random" = "sequential",
     customAgentSet: string[] = []
   ) => {
     const _allAgents = get().localState.currentAgents.agents;
@@ -322,7 +402,7 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
     const _validCustomAgentSet = _customAgentSet.filter((agentName) => _allAgents.some((agent) => agent.name === agentName));
     //await get().saveState();
     await handleOrchestratedChatSubmit(
-      chatMode,
+      orchType,
       numRounds,
       maxRounds,
       order,
@@ -340,26 +420,8 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
   loadFrozenGlobalState: async (id: number) => {
     await loadFrozenGlobalState(id, set);
     
-    // After the main state is loaded, we need to explicitly set orchestration state properties
-    const frozenStateFromDB = await APP_FROZEN_getById(id);
-    
-    if (frozenStateFromDB && frozenStateFromDB.orchestrationState) {
-      try {
-        const orchestrationState = JSON.parse(frozenStateFromDB.orchestrationState);
-        console.log("Explicitly setting orchestration state:", orchestrationState);
-        
-        // Explicitly set each orchestration property
-        set({
-          agentOrder: orchestrationState.agentOrder || "sequential",
-          rounds: orchestrationState.rounds || 0,
-          maxRounds: orchestrationState.maxRounds || 10,
-          orchestrationMode: orchestrationState.orchestrationMode || "agent-orchestrator",
-          customAgentSet: orchestrationState.customAgentSet || []
-        });
-      } catch (error) {
-        console.error("Error setting orchestration state properties:", error);
-      }
-    }
+    // REMOVED: No longer need this explicit orchestration state override
+    // since orchestration settings are now properly included in the loaded state
   },
   deleteFrozenGlobalState: async (id: number) =>
     await deleteFrozenGlobalState(id, get),
@@ -380,8 +442,10 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
     // Load Saved Agent States
     try {
       const savedAgentStates = await SERVER_getAgentsAndTeams(userId);
-      set({ savedAgentStates });
-
+      
+      // Get current orchestration settings before updating state
+      const state = get();
+      
       // Load conversation history && conversation history names
       console.log("!!!LOAD_ESSENTIAL_DATA!!!", userId);
       const converationsForDay = await CONVERSATION_loadLatestDayConversations({
@@ -389,15 +453,32 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
       });
       const conversationHistory =
         await CONVERSATION_getAllConversationDaysForUser({ userId });
-      const _currentConvo = JSON.parse(
-        (await CONVERSATION_getById({
-          id: converationsForDay[converationsForDay.length - 1].id,
-        })) || "{}"
-      );
+      
+      let _currentConvo = [];
+      if (converationsForDay && converationsForDay.length > 0) {
+        try {
+          _currentConvo = JSON.parse(
+            (await CONVERSATION_getById({
+              id: converationsForDay[converationsForDay.length - 1].id,
+            })) || "[]"
+          );
+        } catch (error) {
+          console.error("Error parsing conversation:", error);
+          _currentConvo = [];
+        }
+      }
+      
       set({
+        savedAgentStates,
         converationsForDay,
         conversationHistory,
         currentConversation: _currentConvo,
+        // Preserve orchestration settings
+        agentOrder: state.agentOrder,
+        rounds: state.rounds,
+        maxRounds: state.maxRounds,
+        orchestrationMode: state.orchestrationMode,
+        customAgentSet: state.customAgentSet
       });
     } catch (error) {
       console.error("Error loading essential data:", error);
@@ -420,11 +501,31 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
       dayName,
       userId: get().localState.userId,
     });
-    set({ converationsForDay: _conversationHistory });
+    
+    // Get current orchestration settings before updating state
+    const state = get();
+    
+    set({
+      converationsForDay: _conversationHistory,
+      // Preserve orchestration settings
+      agentOrder: state.agentOrder,
+      rounds: state.rounds,
+      maxRounds: state.maxRounds,
+      orchestrationMode: state.orchestrationMode,
+      customAgentSet: state.customAgentSet
+    });
   },
 
   handleDeleteContextSet: async (id: number) => 
     await handleDeleteContextSet(id, get, set),
   handleDeleteMultipleContextSets: async (ids: number[]) => 
     await handleDeleteMultipleContextSets(ids, get, set),
+
+  // Context operations
+  setContextSet: (contextSet: ContextSet) => set({ contextSet }),
 }));
+
+// If in browser context, expose the store globally for direct access
+if (typeof window !== 'undefined') {
+  (window as any).__ANALYSIS_STORE__ = useAnalysisStore;
+}

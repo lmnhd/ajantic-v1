@@ -34,6 +34,7 @@ export interface OrchestrationConfig {
   streaming?: boolean; // Whether agent responses should be streamed
   userActionModelArgs?: ModelArgs; // Model args for handling user action prompts
   factCheck?: boolean; // Flag for potential fact-checking steps
+  agentOrder?: "sequential" | "seq-reverse" | "random"; // The order in which agents process for fixed-order workflows
 }
 
 /**
@@ -78,21 +79,40 @@ export interface AgentTurnInput {
 export interface AgentTurnResult {
   response: string; // The agent's textual response
   agentName: string;
-  // Indicate if context was potentially modified or needs updating
-  contextModified?: boolean;
-  updatedContextSets?: ContextContainerProps[]; // Optionally return directly modified sets
-  editedContextSets?: any[]; // Context sets that have been edited (for manager-directed workflow)
+  
+  // === Context Modification (primarily used by manager agents) ===
+  contextModified?: boolean; // Flag indicating if context was modified
   allContextSets?: ContextContainerProps[]; // Complete collection of context sets after updates
-  // Include tool call results or structured data if agents return more than text
-  toolCalls?: any[]; // Consider a more specific type later
+  contextSet?: { teamName: string; sets: ContextContainerProps[] }; // Formatted for direct UI display
+  
+  // For backwards compatibility only - these should be deprecated
+  updatedContextSets?: ContextContainerProps[]; // Legacy support
+  editedContextSets?: any[]; // Legacy support
+  
+  // Error information
   error?: string; // If the agent's turn failed
-  // Structured directives from manager agent in Manager-Directed workflow
+  
+  // === Workflow Control (primarily used by manager agents) ===
   agentDirectives?: {
-    nextAgentName: string;
-    messageForNextAgent: string;
-    redirectToUser: boolean;
+    messageTo: string;
+    message: string;
     workflowComplete: boolean;
     contextUpdates: boolean;
+    isInfoRequest: boolean;
+    contextSetUpdate?: {
+      contextSets: Array<{
+        newOrUpdate: "new" | "update";
+        name: string;
+        context: string;
+        visibleToAgents?: "none" | "all" | string | string[];
+      }>;
+    };
+    expectedOutput?: {
+      criteria: string;
+      format?: string;
+      requiredElements?: string[];
+      validationStrategy?: "exact" | "semantic" | "contains" | "custom" | "simple";
+    };
   };
 }
 

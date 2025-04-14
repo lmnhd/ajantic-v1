@@ -1,113 +1,161 @@
-import { AISessionState, ServerMessage } from "@/src/lib/types";
+import { ServerMessage } from "@/src/lib/types";
 import {
     AgentTurnInput,
-    AgentTurnResult,
     OrchestrationFinalResult,
     OrchestrationState,
-} from "../types/base";
+   
+} from "@/src/lib/orchestration/types/base";
 
+import {
+    ORCHESTRATION_executeAgentTurn
+} from "@/src/lib/orchestration/utils/agent-execution";
 import { logger } from "@/src/lib/logger";
-import { ORCHESTRATION_setActiveAgent } from "../utils";
-import { ORCHESTRATION_resetAllControlFlags } from "../utils/pause-cancel";
-import { ORCHESTRATION_executeAgentTurn } from "../utils/agent-execution";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { AISessionState } from "@/src/lib/types";
+import { updateUIState } from "@/src/lib/orchestration/adapter";
 
+// Define the ControlFlags interface
+interface ControlFlags {
+    paused?: boolean;
+    cancelled?: boolean;
+    error?: string;
+}
 
-// Placeholder - Copied from sequential.ts
-// TODO: Refactor into a shared utility
-function formatFinalResult(orchState: OrchestrationState): OrchestrationFinalResult {
-    const finalStatus =
-        orchState.status === "completed" ||
-            orchState.status === "cancelled" || // Cancelled status might still be set externally
-            orchState.status === "error"
-            ? orchState.status
-            : "completed"; // Default to completed for direct interaction if no error/cancel
+/**
+ * Formats the final result of the orchestration
+ */
+function formatFinalResult(
+    state: OrchestrationState,
+    flags: ControlFlags
+): OrchestrationFinalResult {
+    // Map the status to valid OrchestrationFinalResult status values
+    let status: "completed" | "cancelled" | "error" | "stopped";
+    
+    if (flags.error) {
+        status = "error";
+    } else if (flags.cancelled) {
+        status = "cancelled";
+    } else if (state.status === "completed") {
+        status = "completed";
+    } else {
+        status = "stopped";
+    }
+    
     return {
-        status: finalStatus,
-        finalConversationHistory: orchState.conversationHistory,
-        finalContextSets: orchState.contextSets,
-        error: orchState.error,
-        totalRounds: orchState.currentRound, // Will likely always be 0 or 1 here
+        status,
+        finalConversationHistory: state.conversationHistory,
+        finalContextSets: state.contextSets,
+        error: flags.error,
+        totalRounds: state.currentRound
     };
 }
 
 /**
- * Runs a simple interaction, typically executing a single turn for the first agent provided.
- * Assumes external logic handles any further back-and-forth if needed.
- *
- * @param orchState The initial orchState of the orchestration.
- * @returns A promise resolving to the final result of the orchestration.
+ * Runs a direct interaction with the first agent provided.
+ * This function runs primarily on the client side, calling server functions for LLM operations.
+ * 
+ * @param orchestrationState The current orchestration state
+ * @param state Session state for tools and context
+ * @param controlFlags Control flags for orchestration
+ * @returns The final result of the orchestration
  */
 export async function ORCHESTRATION_runDirectInteraction(
-    initialState: OrchestrationState,
-    sessionState: AISessionState,
-    memStore: MemoryVectorStore
+    orchestrationState: OrchestrationState,
+    state: AISessionState,
+    controlFlags: ControlFlags
 ): Promise<OrchestrationFinalResult> {
-    let orchState = { ...initialState };
-    orchState.status = "running";
-    orchState.currentRound = 0; // Only one effective "round"
-    orchState.currentCycleStep = 0;
-
-    const { agents } = orchState.config;
-
-    if (!agents || agents.length === 0) {
-        logger.warn("DIRECT_AGENT_INTERACTION called with no agents.");
-        orchState.status = "error";
-        orchState.error = "No agents provided for direct interaction.";
-        ORCHESTRATION_resetAllControlFlags();
-        return formatFinalResult(orchState);
+    // Check for paused or cancelled state
+    if (controlFlags.paused || controlFlags.cancelled) {
+        logger.log("Direct interaction is paused or cancelled, returning current state");
+        return formatFinalResult(orchestrationState, controlFlags);
     }
 
-    const currentAgent = agents[0]; // Only use the first agent
+    // Get initial message content
+    const initialMessage = orchestrationState.conversationHistory.find(
+        (msg: any) => msg.role === "user" && msg.isInitialMessage
+    );
 
-    try {
-        logger.log("Starting DIRECT_AGENT_INTERACTION", { agent: currentAgent.name, config: orchState.config });
-        ORCHESTRATION_setActiveAgent(orchState, currentAgent);
-
-        // Prepare input for the single turn
-        const turnInput: AgentTurnInput = {
-            message: orchState.config.initialMessage,
-            history: orchState.conversationHistory, // Pass initial history (likely just user message)
-            contextSets: orchState.contextSets,
-            agentConfig: currentAgent,
-            fullTeam: { name: orchState.config.teamName, agents: orchState.config.agents, objectives: orchState.config.objectives },
-            orchestrationState: orchState,
-            userId: orchState.config.userId,
-            teamName: orchState.config.teamName,
-        };
-
-        // --- Execute Agent Turn --- //
-        const turnResult = await ORCHESTRATION_executeAgentTurn(turnInput, sessionState, orchState.config, memStore);
-        logger.log(`Agent ${turnResult.agentName} completed turn.`);
-
-        // --- Update State --- //
-        const agentResponseMessage: ServerMessage = {
-            role: "assistant",
-            content: turnResult.response,
-            agentName: turnResult.agentName,
-        };
-        // Replace history instead of appending, or keep initial message? Append for now.
-        orchState.conversationHistory = [...orchState.conversationHistory, agentResponseMessage];
-
-        if (turnResult.updatedContextSets) {
-            orchState.contextSets = turnResult.updatedContextSets;
-            logger.log("Context sets updated.");
-        }
-
-        if (turnResult.error) {
-            throw new Error(turnResult.error);
-        }
-
-        orchState.status = "completed"; // Assume completion after one turn
-
-    } catch (error) {
-        logger.error("Error during direct interaction execution:", { error });
-        orchState.status = "error";
-        orchState.error = error instanceof Error ? error.message : String(error);
-    } finally {
-        ORCHESTRATION_resetAllControlFlags();
-        ORCHESTRATION_setActiveAgent(orchState, null);
+    if (!initialMessage) {
+        logger.error("No initial message found in conversation history");
+        return formatFinalResult(orchestrationState, {
+            ...controlFlags,
+            error: "No initial message found in conversation history",
+        });
     }
 
-    return formatFinalResult(orchState);
+    // Select the first agent - direct interaction only works with a single agent
+    if (!orchestrationState.config.agentOrder) {
+        logger.error("No agent order provided in orchestration config");
+        return formatFinalResult(orchestrationState, {
+            ...controlFlags,
+            error: "No agent order provided in orchestration config",
+        });
+    }
+
+    // Ensure team is defined
+    if (!orchestrationState.config.teamName) {
+        logger.error("No team provided in orchestration state");
+        return formatFinalResult(orchestrationState, {
+            ...controlFlags,
+            error: "No team provided in orchestration state",
+        });
+    }
+
+    // Get the agent to use
+    const agentName = orchestrationState.config.agentOrder.split(",")[0].trim();
+    const agent = orchestrationState.config.agents.find(
+        (a: any) => a.name === agentName
+    );
+
+    if (!agent) {
+        logger.error(`Agent ${agentName} not found in team`);
+        return formatFinalResult(orchestrationState, {
+            ...controlFlags,
+            error: `Agent ${agentName} not found in team`,
+        });
+    }
+
+    // Prepare agent turn input
+    const agentTurnInput: AgentTurnInput = {
+        agentConfig: agent,
+        message: initialMessage.content || "",
+        history: orchestrationState.conversationHistory,
+        contextSets: orchestrationState.contextSets || [],
+        userId: orchestrationState.config.userId || "unknown",
+        teamName: orchestrationState.config.teamName || "Direct Interaction",
+        orchestrationState: orchestrationState,
+        fullTeam: {agents: orchestrationState.config.agents, name: orchestrationState.config.teamName, objectives: orchestrationState.config.objectives},
+    };
+
+    // Set current agent
+    orchestrationState.currentAgent = agent;
+    orchestrationState.status = "running";
+    
+    // Update UI state before agent execution
+    await updateUIState(orchestrationState);
+
+    // Execute the agent turn using the server function
+    const turnResult = await ORCHESTRATION_executeAgentTurn(
+        agentTurnInput,
+        state,
+        orchestrationState.config
+    );
+
+    // Update orchestration state with agent response
+    orchestrationState.conversationHistory.push({
+        role: "assistant",
+        content: turnResult.response,
+        senderName: agent.name,
+        isResponse: true,
+    } as ServerMessage);
+
+    // Reset control flags and update status
+    orchestrationState.status = "completed";
+    controlFlags.paused = false;
+    controlFlags.cancelled = false;
+    
+    // Final UI update
+    await updateUIState(orchestrationState);
+
+    // Return final result
+    return formatFinalResult(orchestrationState, controlFlags);
 } 

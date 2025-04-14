@@ -200,6 +200,11 @@
             "name": "models/gemini-1.5-flash-8b-latest",
             "provider": "google",
             "isThinkingModel": false
+        },
+        "models/gemini-2.5-pro-exp-03-25": {
+            "name": "models/gemini-2.5-pro-exp-03-25",
+            "provider": "google",
+            "isThinkingModel": true
         }
     },
     "Cohere": {

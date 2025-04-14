@@ -46,8 +46,18 @@ export function updateMessages(
 ) {
   console.log("!!!UPDATE_MESSAGES!!!", messages);
   const state = get();
-  set({ currentConversation: messages });
+  
+  // Preserve orchestration settings when updating currentConversation
+  set({ 
+    currentConversation: messages,
+    agentOrder: state.agentOrder,
+    rounds: state.rounds,
+    maxRounds: state.maxRounds,
+    orchestrationMode: state.orchestrationMode,
+    customAgentSet: state.customAgentSet
+  });
 
+  // Include orchestration state in the frozen state
   const frozenState: AppFrozenState = {
     localState: state.localState,
     currentConversation: messages,
@@ -56,6 +66,13 @@ export function updateMessages(
       contextSet: state.contextSet,
       analysisName: state.localState.currentAgents?.name || "",
       userId: state.localState.userId,
+    },
+    orchestrationState: {
+      agentOrder: state.agentOrder,
+      rounds: state.rounds,
+      maxRounds: state.maxRounds,
+      orchestrationMode: state.orchestrationMode,
+      customAgentSet: state.customAgentSet,
     },
   };
   AnalysisStorage.FROZEN_STATE_saveToIndexDB(frozenState);
@@ -72,22 +89,24 @@ export function handleClearMessages(get: Function, set: Function) {
     ).then((summary: string | null) => {
       // If we got a summary back, update the messages on the client side
       if (summary) {
-        get().updateMessages([
-          {
-            role: "assistant",
-            content: summary,
-            agentName: "Summarizer",
-            currentState: JSON.stringify(get().localState),
-          },
-        ]);
+        set({
+          currentConversation: [
+            {
+              role: "assistant",
+              content: summary,
+              agentName: "Summarizer",
+              currentState: JSON.stringify(get().localState),
+            },
+          ]
+        });
       } else {
-        get().updateMessages([]);
+        set({ currentConversation: [] });
       }
     });
   } else {
-    get().updateMessages([]);
+    set({ currentConversation: [] });
   }
-  get().handleChangeIndex();
+  set({ changeIndex: get().changeIndex + 1 });
 }
 
 export function syncWithGlobalMessages(
@@ -105,6 +124,12 @@ export function syncWithGlobalMessages(
         ...globalMessages.currentState.genericData,
       },
     },
+    // Preserve orchestration settings
+    agentOrder: state.agentOrder,
+    rounds: state.rounds,
+    maxRounds: state.maxRounds,
+    orchestrationMode: state.orchestrationMode,
+    customAgentSet: state.customAgentSet
   });
 }
 

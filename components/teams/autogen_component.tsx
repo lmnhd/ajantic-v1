@@ -241,8 +241,7 @@ Constant Testing: Analyze data and continuously adjust keywords, content, and di
       agentOrder: _outline.orchestrationType as
         | "sequential"
         | "seq-reverse"
-        | "random"
-        | "auto",
+        | "random",
       customAgentSet: _outline.agentSequence,
       localState: _newState,
     });
@@ -540,7 +539,7 @@ Constant Testing: Analyze data and continuously adjust keywords, content, and di
             <h1 className="text-sm ">Process to Automate</h1>
             <textarea
               rows={10}
-              className="w-full text-gray-900 h-full"
+              className="w-full text-black bg-white h-full p-2 border border-gray-300 rounded"
               placeholder="Describe a process to automate"
               value={automationProcess}
               onChange={(e) => setAutomationProcess(e.target.value)}

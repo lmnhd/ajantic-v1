@@ -1,6 +1,6 @@
 import { AgentComponentProps, AgentType, AI_Agent_ToolsDescription } from "@/src/lib/types"
 import { UTILS_getAllAvailableToolsDescriptions } from "@/src/lib/utils"
-import { AutoGenTeam } from "../autogen"
+import { AutoGenTeam } from "../autogen/autogen"
 import { UTILS_jsonToXmlString } from "@/src/lib/teams/lib/teams-utils"
 
 export const PROMPT_AUTO_GENERATE_WORKFLOW = {
@@ -73,7 +73,14 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
         </output>
        `
     },
-    outlinePrompt: async (processToAutomate: string, availableAgents: AgentComponentProps[], currentOutline?: AutoGenTeam, modifications?: string[], memoryNotes?: string[]) => {
+    outlinePrompt: async (
+        processToAutomate: string, 
+        availableAgents: AgentComponentProps[], 
+        currentOutline?: AutoGenTeam, 
+        modifications?: string[], 
+        memoryNotes?: string[],
+        orchestrationTypes?: {name: string, description: string}[]
+    ) => {
         let xmlString = "";
         if (currentOutline) {
             const resolvedOutline = {
@@ -108,8 +115,9 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
                     Search for a specific product on a website and email the results to the user
                     </example>
                 </instruction>
-                <instruction>For "auto" orchestration, the first agent must be a manager</instruction>
-                <instruction>Prefer 'auto' orchestration and manager agents especially when task verification is needed</instruction>
+                <instruction>For workflows requiring manager agents, the first agent in the sequence must be a manager</instruction>
+                <instruction>Prefer 'MANAGER_DIRECTED_WORKFLOW' for most flows as it provides the most flexible and robust orchestration</instruction>
+                <instruction>Use 'LLM_ROUTED_WORKFLOW' when simpler LLM-based task routing is sufficient</instruction>
                 ${currentOutline ? `
                 <instruction>This is a request to modify an previously generated outline. Review the current outline and make the requested modifications.</instruction>
                 <instruction>Check for issues in processing logic that may have been introduced by the user and adjust the outline accordingly.</instruction>
@@ -123,11 +131,21 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
 
         <available_agents>
             ${availableAgents.map(agent => `<agent>
-                <name>${agent.name}</name>
+                <n>${agent.name}</n>
                 <title>${agent.title}</title>
                 <role_description>${agent.roleDescription}</role_description>
             </agent>`).join("\n")}
         </available_agents>
+
+        <orchestration_types>
+            ${orchestrationTypes ? orchestrationTypes.map(type => 
+                `<${type.name}>${type.description}</${type.name}>`
+            ).join("\n") : `
+            <SEQUENTIAL_WORKFLOW>Agents processed in fixed forward order</SEQUENTIAL_WORKFLOW>
+            <RANDOM_WORKFLOW>Agents processed in random order</RANDOM_WORKFLOW>
+            <LLM_ROUTED_WORKFLOW>An LLM analyzes messages to route tasks dynamically</LLM_ROUTED_WORKFLOW>
+            <MANAGER_DIRECTED_WORKFLOW>A Manager agent explicitly directs the next agent in its response</MANAGER_DIRECTED_WORKFLOW>`}
+        </orchestration_types>
 
         ${currentOutline ? `<original_outline>
             ${xmlString}
@@ -144,15 +162,15 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
             ${memoryNotes.map(note => `<memory>${note}</memory>`).join("\n")}
         </related_memories>` : ""}
 
-        <output>
+        <o>
             <team_name>Name of the team</team_name>
             <team_objective>Objective of the team</team_objective>
             <available_agents>Predefined agents to be used as part of the team</available_agents>
             <new_agents>New agents needed to complete the team</new_agents>
             <agent_sequence>Order of agent processing</agent_sequence>
-            <orchestration_type>sequential|random|auto</orchestration_type>
+            <orchestration_type>SEQUENTIAL_WORKFLOW | RANDOM_WORKFLOW | LLM_ROUTED_WORKFLOW | MANAGER_DIRECTED_WORKFLOW</orchestration_type>
             <process_steps>Steps of the process to automate</process_steps>
-        </output>
+        </o>
        `
     },
     agentBuilderPrompt: (name: string, title: string, roleDescription: string, type: "agent" | "tool-operator" | "manager" | "researcher", availableTools: AI_Agent_ToolsDescription[], toolHints: string[], teamObjective: string) => {
@@ -162,7 +180,8 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
 
         <instructions>
             <instruction>Study the provided agent type and role description to determine the best way to build the agent</instruction>
-            <instruction>Assess if knowledge base supplementation is needed</instruction>
+            <instruction>Be EXTREMELY selective about knowledge base needs - most agents should NOT have a knowledge base</instruction>
+            <instruction>ONLY recommend a knowledge base if the agent requires HIGHLY SPECIALIZED or PROPRIETARY information not found in general LLM training</instruction>
             <instruction>Create process steps for the agent to follow</instruction>
             ${toolHints.length > 0 ? `
             <instruction>For tool-operator agents, carefully select the appropriate tools from the tool repository</instruction>
@@ -194,21 +213,21 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
         ### Here are the specific details for the agent you are building:
          <agent_info>
             <type>${type}</type>
-            <name>${name}</name>
+            <n>${name}</n>
             <title>${title}</title>
             <role_description>${roleDescription}</role_description>
         </agent_info>
 
-        <output>
-         <name>The agents name</name>
+        <o>
+         <n>The agents name</n>
          <role-description>The details of the agent role</role-description>
          <title>The agents title</title>
          <type>Manager, Agent, Tool_Operator, or researcher</type>
          <process>The steps for the agent to follow for successfull task completion</process>
          <tools>Existing or custom tools the agent will need access to (by group name)</tools>
          <tool-requests>Describe the tools this agent will need that do not already exist</tool-requests>
-         <knowledge-base>True or False - Should this agent possess a supplimental knowledge data base to help it with it's tasks? Will this agent's tasks require very specialized information that an LLM would not normally be trained on?</knowledge-base>
-        </output>
+         <knowledge-base>Almost always FALSE. Only set to TRUE if this agent absolutely requires HIGHLY SPECIALIZED information that an LLM would not know about, such as proprietary company data or extremely technical/niche domain knowledge. For general knowledge tasks, keep FALSE.</knowledge-base>
+        </o>
         `
     },
     perplexityModelResearch: (agentRoles: {name: string, title: string, roleDescription: string}[], modelNames: {provider: string, modelName: string}[]) => {

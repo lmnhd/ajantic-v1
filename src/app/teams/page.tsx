@@ -50,6 +50,7 @@ import { useFullscreen } from "@/src/lib/hooks/useFullscreen";
 import { AIMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { ClientMessage } from "@/src/lib/aicontext";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types";
 
 export default function TeamsPage() {
   const { updateNavbar, resetNavbar } = useNavbarStore();
@@ -287,7 +288,7 @@ export default function TeamsPage() {
       return;
     }
     await handleOrchestratedChatSubmit(
-      "wf-sequential-1",
+      orchestrationMode,
       rounds,
       maxRounds,
       agentOrder,
@@ -299,7 +300,7 @@ export default function TeamsPage() {
     await ORCHESTRATION_PAUSE_resetAllFlags();
     setOrchStatus("free");
 
-    if (orchestrationMode === "agent-orchestrator") {
+    if (orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION) {
       await handleAgentChatSubmit(agentGlobalChatInput);
       await CONVERSATION_store({
         dayName: await formatDayName(new Date()),
@@ -633,6 +634,11 @@ export default function TeamsPage() {
               className="w-full p-1 text-xs bg-gradient-to-r from-indigo-700/70  via-violet-950/70 to-violet-700/70 mix-blend-color-dodge text-indigo-300"
               onClick={() => {
                 console.log("Current frozen states:", frozenStates);
+                console.log("Current orchestration settings:", orchestrationMode);
+                console.log("Current agent order:", agentOrder);
+                console.log("Current rounds:", rounds);
+                console.log("Current max rounds:", maxRounds);
+                console.log("Current custom agent set:", customAgentSet);
                 console.log("Current local state:", localState);
                 console.log("Current server messages:", currentConversation);
                 console.log("Current context set:", contextSet);

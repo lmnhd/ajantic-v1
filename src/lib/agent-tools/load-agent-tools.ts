@@ -14,7 +14,7 @@ import { AGENT_TOOLS_video } from "./video-gen/runway-video-tool";
 import {
   AGENT_TOOLS_generateReferenceDocuments,
   AGENT_TOOLS_urlScrape,
-} from "./agent-url-scrape";
+} from "./url-scrape/url-scrape";
 import { AGENT_TOOLS_contextSets } from "./context-sets";
 import { AGENT_TOOLS_fetch } from "./fetch/fetch";
 import { AGENT_TOOLS_puppeteer } from "./puppeteer-tool/puppeteer";
@@ -23,7 +23,7 @@ import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { TextChatLogProps } from "../text-chat-log";
 import { AGENT_TOOLS_dynamicScript } from "./dynamic-tool/dynamic-action";
-import { AGENT_TOOLS_gmail } from "./gmail.server";
+import { AGENT_TOOLS_gmail } from "./gmail";
 import { AGENT_TOOLS_NEXT_AUTH } from "./next-auth-tool/next-auth-tool";
 import { AGENT_TOOLS_s3Store } from "./s3-store-tool";
 import { AGENT_TOOLS_DOCUMENT_PARSE } from "./documents-tools/document-parse-tool";
@@ -42,49 +42,18 @@ export const LOAD_AGENT_TOOLS = (
   state: AISessionState,
   agentName: string,
   userID: string,
-  query: string,
-  /** Optional record of custom tools created during agent initialization */
-  customTools?: Record<string, any>
+  query: string
 ) => {
   const allAgents = state.currentAgents.agents;
   const currentAgent = allAgents.find((agent) => agent.name === agentName);
   if (!currentAgent) {
     throw new Error(`Current agent not found: ${agentName}`);
   }
-  // First, add any custom tools if provided
-  if (customTools && Object.keys(customTools).length > 0) {
-    // Log the custom tools that are going to be loaded
-    const customToolNames = Object.keys(customTools);
-    logger.tool("Adding Custom Tools to Agent", {
-      agentName,
-      toolCount: customToolNames.length,
-      toolNames: customToolNames.join(", "),
-    });
+  
+  // Custom tools are now directly handled through the loadCustomToolsForOrchestration function
+  // and passed in the unified tools array, so we don't need to handle them separately here
 
-    // Add the custom tools to the loadedTools object
-    loadedTools = {
-      ...loadedTools,
-      ...customTools,
-    };
-
-    // Debug log to console for immediate feedback during development
-    console.log(
-      `[TOOLS] Added ${
-        customToolNames.length
-      } custom tools to ${agentName}: ${customToolNames.join(", ")}`
-    );
-
-    // Add a text chat log entry if available
-    textChatLogs.push?.({
-      role: "system",
-      message: `Added custom tools to ${agentName}: ${customToolNames.join(
-        ", "
-      )}`,
-      agentName,
-    });
-  }
-
-  // Then process the standard tool names
+  // Process all tool names (standard and custom references)
   toolNames.forEach(async (toolName) => {
     // Handle string tool names (custom) vs enum tool names (standard)
     const toolNameStr = toolName.toString();
@@ -93,7 +62,7 @@ export const LOAD_AGENT_TOOLS = (
     if (
       !Object.values(AI_Agent_Tools).includes(toolNameStr as AI_Agent_Tools)
     ) {
-      return; // Skip - this is handled by custom tools
+      return; // Skip - custom tool references are handled by loadCustomToolsForOrchestration
     }
 
     switch (toolNameStr as AI_Agent_Tools) {

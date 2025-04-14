@@ -1,10 +1,11 @@
 "use server"
 import { ModelProviderEnum, ServerMessage } from "@/src/lib/types";
-import { generateObject } from "ai";
+import { CoreMessage, generateObject } from "ai";
 import { z } from "zod";
 import { MODEL_getModel_ai } from "../../../../vercelAI-model-switcher";
 import { OpenAIModelNames } from "@/src/app/api/model/openai";
 import { logger } from "@/src/lib/logger";
+import { MODEL_JSON, UTILS_getModelArgsByName } from "@/src/lib/utils";
 
 export async function isConversationMemoryWorthy(conversation: ServerMessage[]) {
 
@@ -29,7 +30,7 @@ export async function isConversationMemoryWorthy(conversation: ServerMessage[]) 
     </criteria>
     
     <conversation>
-    ${conversation.map(msg => `<message sender="${msg.agentName}">${msg.content}</message>`).join('\n')}
+    ${conversation.map(msg => `<message sender="${msg.agentName || 'Unknown'}">${msg.content || ''}</message>`).join('\n')}
     </conversation>
     
     <instructions>
@@ -39,13 +40,15 @@ export async function isConversationMemoryWorthy(conversation: ServerMessage[]) 
     </instructions>
     `
 
+    const _modelArgs = UTILS_getModelArgsByName(MODEL_JSON().OpenAI["gpt-4o-mini"].name);
+    const _model = await MODEL_getModel_ai(_modelArgs)
     const _response = await generateObject({
-        model: await MODEL_getModel_ai({
-            modelName: OpenAIModelNames["gpt-4o-mini"],
-            provider: ModelProviderEnum.OPENAI,
-            temperature: 0,
-        }),
-        prompt: _prompt,
+        model: _model,
+        system: _prompt,
+        messages: conversation.map(msg => ({
+            role: msg.role as CoreMessage['role'],
+            content: msg.content || "",
+        })) as CoreMessage[],
         schema: z.object({
             decision: z.enum(["REMEMBER", "DISREGARD"]),
             explanation: z.string(),

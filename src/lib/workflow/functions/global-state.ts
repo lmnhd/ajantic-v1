@@ -5,7 +5,9 @@ import {
   ContextSet,
   OrchestrationType,
   ServerMessage,
+  LineLyricType
 } from "@/src/lib/types";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types/base";
 import { toast } from "@/components/ui/use-toast";
 import {
   APP_FROZEN_delete,
@@ -13,7 +15,6 @@ import {
   APP_FROZEN_getAll,
   APP_FROZEN_store,
 } from "@/src/lib/app-frozen";
-import { LineLyricType } from "@/components/songeditor/lyric/line";
 import { INDEXEDDB_storeGenericData } from "@/src/lib/indexDB";
 
 //import { LOCAL_STATE_GlobalSave, LOCAL_STATE_GlobalDelete, LOCAL_STATE_GetAllGlobalStates } from "../analysis-store";
@@ -96,7 +97,7 @@ export async function loadFrozenGlobalState(
         agentOrder: "sequential" | "seq-reverse" | "random";
         rounds: number;
         maxRounds: number;
-        orchestrationMode: OrchestrationType;
+        orchestrationMode: OrchestrationType2;
         customAgentSet: string[];
       };
       
@@ -105,16 +106,47 @@ export async function loadFrozenGlobalState(
           agentOrder: "sequential",
           rounds: 0,
           maxRounds: 10,
-          orchestrationMode: "agent-orchestrator" as OrchestrationType,
+          orchestrationMode: OrchestrationType2.DIRECT_AGENT_INTERACTION,
           customAgentSet: [],
         };
+        
+        // Sanitize agent order - convert legacy "auto" to "sequential" if found
+        if (_orchestrationState.agentOrder === "auto" as any) {
+          console.log("Converting legacy 'auto' agent order to 'sequential'");
+          _orchestrationState.agentOrder = "sequential";
+        }
+        
+        // Convert legacy OrchestrationType to OrchestrationType2
+        if (_orchestrationState.orchestrationMode) {
+          const legacyMode = _orchestrationState.orchestrationMode;
+          if (legacyMode === OrchestrationType2.DIRECT_AGENT_INTERACTION) {
+            _orchestrationState.orchestrationMode = OrchestrationType2.DIRECT_AGENT_INTERACTION;
+          } else if (legacyMode === OrchestrationType2.SEQUENTIAL_WORKFLOW) {
+            // Map based on agent order
+            if (_orchestrationState.agentOrder === "sequential") {
+              _orchestrationState.orchestrationMode = OrchestrationType2.SEQUENTIAL_WORKFLOW;
+            } else if (_orchestrationState.agentOrder === "seq-reverse") {
+              _orchestrationState.orchestrationMode = OrchestrationType2.REVERSE_WORKFLOW;
+            } else {
+              _orchestrationState.orchestrationMode = OrchestrationType2.RANDOM_WORKFLOW;
+            }
+          } else if (legacyMode === OrchestrationType2.LLM_ROUTED_WORKFLOW) {
+            _orchestrationState.orchestrationMode = OrchestrationType2.LLM_ROUTED_WORKFLOW;
+          } else if (legacyMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW) {
+            _orchestrationState.orchestrationMode = OrchestrationType2.MANAGER_DIRECTED_WORKFLOW;
+          } else {
+            // Default to SEQUENTIAL_WORKFLOW if unknown
+            _orchestrationState.orchestrationMode = OrchestrationType2.SEQUENTIAL_WORKFLOW;
+          }
+          console.log(`Converted legacy mode '${legacyMode}' to '${_orchestrationState.orchestrationMode}'`);
+        }
       } catch (error) {
         console.error("Error parsing orchestration state:", error);
         _orchestrationState = {
           agentOrder: "sequential",
           rounds: 0,
           maxRounds: 10,
-          orchestrationMode: "agent-orchestrator" as OrchestrationType,
+          orchestrationMode: OrchestrationType2.DIRECT_AGENT_INTERACTION,
           customAgentSet: [],
         };
       }

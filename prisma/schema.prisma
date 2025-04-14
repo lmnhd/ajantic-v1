@@ -251,3 +251,18 @@ model AgentComponent {
   @@unique([teamId, name])
   @@index([teamId])
 }
+
+model CustomTool {
+  id                String   @id @default(cuid())
+  name              String
+  description       String
+  parameters        String   // JSON string
+  implementation    String   // Code or endpoint
+  implementationType String   @default("function")
+  metadata          String   // JSON string with agentId, userId, etc.
+  version           Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([name])
+}

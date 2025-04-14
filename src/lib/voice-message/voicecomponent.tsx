@@ -89,7 +89,7 @@ function VoiceComponent({
         <div>
           {/* Recorder */}
           <Recorder 
-            className={cn(className, "w-full bg-slate-500 text-indigo-400")}
+            className={cn(className, "w-full bg-slate-800 text-pink-400 rounded-lg")}
             uploadAudio={uploadAudio} 
             useImmediateColor={true} 
             onDoubleClick={recorderDoubleClick}

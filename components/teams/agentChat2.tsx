@@ -16,8 +16,8 @@ import {
   ModelProviderEnum,
   ServerMessage,
   AISessionState,
-  OrchestrationType,
 } from "@/src/lib/types";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types/base";
 import { Conversation } from "@prisma/client"; // Assuming Prisma setup
 import { toast } from "@/components/ui/use-toast";
 
@@ -43,7 +43,14 @@ import { storeCancellationFlag } from "@/src/lib/workflow/functions/message-hand
 import { clearCancellationFlag, isChatCancelled } from "@/src/lib/workflow/functions/message-handlers/orchestrated-chat/cancel-chat";
 import { ORCHESTRATION_PAUSE_clearFlag, ORCHESTRATION_PAUSE_continueChat, ORCHESTRATION_PAUSE_storeContinueFlag, ORCHESTRATION_PAUSE_storeFlag } from "@/src/lib/workflow/functions/message-handlers/orchestrated-chat/pause-chat";
 import VoiceComponent from "@/src/lib/voice-message/voicecomponent";
- // Placeholder
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+} from "@/components/ui/select";
 
 type AgentChatProps = {
   currentConversation: ServerMessage[];
@@ -51,8 +58,8 @@ type AgentChatProps = {
   maxRounds: number;
   setRounds: (rounds: number) => void;
   setMaxRounds: (maxRounds: number) => void;
-  agentOrder: "sequential" | "seq-reverse" | "random" | "auto";
-  setAgentOrder: (order: "sequential" | "seq-reverse" | "random" | "auto") => void;
+  agentOrder: "sequential" | "seq-reverse" | "random";
+  setAgentOrder: (order: "sequential" | "seq-reverse" | "random") => void;
   setCurrentConversation: (messages: ServerMessage[]) => void;
   index: number;
   handleSubmit: (e: React.FormEvent<HTMLFormElement> | { target: { value: string } }) => void;
@@ -68,8 +75,8 @@ type AgentChatProps = {
   externalInput?: string;
   setExternalInput?: (input: string) => void;
   // handleMessageComponentChange?: () => void; // Removed as unused
-  orchestrationMode: OrchestrationType;
-  setOrchestrationMode: (mode: OrchestrationType) => void;
+  orchestrationMode: OrchestrationType2;
+  setOrchestrationMode: (mode: OrchestrationType2) => void;
   agentActive: boolean;
   customAgentSet: string[];
   setOrRemoveCustomAgent: (agent: string) => void;
@@ -342,7 +349,7 @@ export default function AgentChat2({
 
   // Effect to potentially prefix input based on agent selection in agent-orchestrator mode
   useEffect(() => {
-    if (orchestrationMode === 'agent-orchestrator' && index >= 0 && allAgents?.[index]) {
+    if (orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION && index >= 0 && allAgents?.[index]) {
         const agentPrefix = `${allAgents[index].name}::: `;
         if (!state.input.startsWith(agentPrefix)) {
             // Check if there's existing content after potentially incorrect prefix
@@ -357,7 +364,7 @@ export default function AgentChat2({
                 inputRef.current.value = newInput;
             }
         }
-    } else if (orchestrationMode !== 'agent-orchestrator') {
+    } else if (orchestrationMode !== OrchestrationType2.DIRECT_AGENT_INTERACTION) {
         // In other modes, remove agent prefix if present
         const parts = state.input.split(":::");
         if (parts.length > 1) {
@@ -393,11 +400,40 @@ export default function AgentChat2({
 
   // Memoize event handlers for orchestration controls
   const handleToggleMode = useCallback(() => {
-    setOrchestrationMode(orchestrationMode === "agent-orchestrator" ? "wf-sequential-1" : "agent-orchestrator");
+    // Cycle through orchestration types
+    const modes = [
+      OrchestrationType2.DIRECT_AGENT_INTERACTION,
+      OrchestrationType2.SEQUENTIAL_WORKFLOW,
+      OrchestrationType2.LLM_ROUTED_WORKFLOW,
+      OrchestrationType2.MANAGER_DIRECTED_WORKFLOW
+    ];
+    const currentIndex = modes.indexOf(orchestrationMode);
+    const nextIndex = (currentIndex + 1) % modes.length;
+    setOrchestrationMode(modes[nextIndex]);
   }, [orchestrationMode, setOrchestrationMode]);
 
+  // Helper function to get a user-friendly name for the orchestration mode
+  const getOrchestrationModeName = (mode: OrchestrationType2): string => {
+    switch (mode) {
+      case OrchestrationType2.DIRECT_AGENT_INTERACTION:
+        return "Direct Agent";
+      case OrchestrationType2.SEQUENTIAL_WORKFLOW:
+        return "Sequential";
+      case OrchestrationType2.REVERSE_WORKFLOW:
+        return "Reverse";
+      case OrchestrationType2.RANDOM_WORKFLOW:
+        return "Random";
+      case OrchestrationType2.LLM_ROUTED_WORKFLOW:
+        return "LLM Routed";
+      case OrchestrationType2.MANAGER_DIRECTED_WORKFLOW:
+        return "Agentic";
+      default:
+        return String(mode);
+    }
+  };
+
   const handleToggleAgentOrder = useCallback(() => {
-    setAgentOrder(agentOrder === 'sequential' ? 'seq-reverse' : agentOrder === 'seq-reverse' ? 'random' : agentOrder === 'random' ? 'auto' : 'sequential');
+    setAgentOrder(agentOrder === 'sequential' ? 'seq-reverse' : agentOrder === 'seq-reverse' ? 'random' : 'sequential');
   }, [agentOrder, setAgentOrder]);
 
   return (
@@ -412,9 +448,9 @@ export default function AgentChat2({
       {/* Top Bar with Agent Selection/Info */}
       <div className="flex-shrink-0 flex items-center justify-between p-2 bg-gray-800/30 border-b border-gray-700">
          <p className="text-gray-300 text-sm truncate">
-          {orchestrationMode === "agent-orchestrator" ? 
+          {orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION ? 
             (index >= 0 && allAgents?.[index] ? `Talking to: ${allAgents[index].name}` : "Select Agent") : 
-            `Mode: ${orchestrationMode} (${customAgentSet.length > 0 ? `${customAgentSet.length} agents` : 'All Agents'})`
+            `Mode: ${getOrchestrationModeName(orchestrationMode)} (${customAgentSet.length > 0 ? `${customAgentSet.length} agents` : 'All Agents'})`
           }
         </p>
          <div className="flex items-center gap-1">
@@ -463,28 +499,39 @@ export default function AgentChat2({
                  </div>
               ) : (
                  <div className="flex flex-wrap items-center gap-1">
-                     {/* Mode Selector */}
-                    <TooltipProvider delayDuration={100}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="ghost" size="xs" onClick={handleToggleMode}>
-                            {orchestrationMode}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top"><p>Toggle Mode</p></TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                     {/* Mode Selector - Changed from toggle to dropdown */}
+                    <Select 
+                      value={orchestrationMode}
+                      onValueChange={(value) => setOrchestrationMode(value as OrchestrationType2)}
+                    >
+                      <SelectTrigger className="h-auto py-0.5 px-2 text-xs w-[130px]">
+                        {getOrchestrationModeName(orchestrationMode as OrchestrationType2)}
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700">
+                        <SelectGroup>
+                          <SelectLabel className="text-xs text-gray-700">Agent Modes</SelectLabel>
+                          <SelectItem value={OrchestrationType2.DIRECT_AGENT_INTERACTION} className="text-xs">Direct Agent</SelectItem>
+                          <SelectLabel className="text-xs text-gray-700 pt-2">Workflow Modes</SelectLabel>
+                          <SelectItem value={OrchestrationType2.SEQUENTIAL_WORKFLOW} className="text-xs">Sequential</SelectItem>
+                          <SelectItem value={OrchestrationType2.REVERSE_WORKFLOW} className="text-xs">Reverse</SelectItem>
+                          <SelectItem value={OrchestrationType2.RANDOM_WORKFLOW} className="text-xs">Random</SelectItem>
+                          <SelectLabel className="text-xs text-gray-700 pt-2">Advanced Modes</SelectLabel>
+                          <SelectItem value={OrchestrationType2.LLM_ROUTED_WORKFLOW} className="text-xs">LLM Routed</SelectItem>
+                          <SelectItem value={OrchestrationType2.MANAGER_DIRECTED_WORKFLOW} className="text-xs">Agentic</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
 
-                    {/* Rounds Selector (Conditional) */}
-                    {orchestrationMode !== "agent-orchestrator" && agentOrder !== "auto" && (
+                    {/* Rounds Selector - Always visible for orchestrated modes */}
+                    {orchestrationMode !== OrchestrationType2.DIRECT_AGENT_INTERACTION && orchestrationMode !== OrchestrationType2.MANAGER_DIRECTED_WORKFLOW && orchestrationMode !== OrchestrationType2.LLM_ROUTED_WORKFLOW && (
                          <div className="flex items-center gap-1 rounded bg-gray-700/50 px-1">
                             <Button variant="ghost" size="xs" className="p-0 h-4 w-4" onClick={() => setRounds(Math.max(0, rounds - 1))}>-</Button>
                             <span className="w-3 text-center">{rounds === 0 ? "∞" : rounds}</span>
                             <Button variant="ghost" size="xs" className="p-0 h-4 w-4" onClick={() => setRounds(rounds + 1)}>+</Button>
                          </div>
                     )}
-                    {/* Max Rounds (Conditional) */}
-                    {orchestrationMode !== "agent-orchestrator" && agentOrder !== "auto" && rounds === 0 && (
+                    {/* Max Rounds - Only visible when rounds is 0 */}
+                    {orchestrationMode !== OrchestrationType2.DIRECT_AGENT_INTERACTION && rounds === 0 && (
                         <div className="flex items-center gap-1 rounded bg-gray-700/50 px-1">
                             <span className="text-gray-400 mr-1">Max:</span>
                             <Button variant="ghost" size="xs" className="p-0 h-4 w-4" onClick={() => setMaxRounds(Math.max(1, maxRounds - 1))}>-</Button>
@@ -492,19 +539,19 @@ export default function AgentChat2({
                             <Button variant="ghost" size="xs" className="p-0 h-4 w-4" onClick={() => setMaxRounds(maxRounds + 1)}>+</Button>
                         </div>
                     )}
-                    {/* Agent Order Selector (Conditional) */}
-                    {orchestrationMode !== "agent-orchestrator" && (
+                    {/* Sequence Order Toggle - Only visible for orchestrated modes */}
+                    {orchestrationMode !== OrchestrationType2.DIRECT_AGENT_INTERACTION && customAgentSet.length === 0 && orchestrationMode !== OrchestrationType2.MANAGER_DIRECTED_WORKFLOW && orchestrationMode !== OrchestrationType2.LLM_ROUTED_WORKFLOW && (
                         <TooltipProvider delayDuration={100}>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button variant="ghost" size="xs" onClick={handleToggleAgentOrder}>{agentOrder}</Button>
                              </TooltipTrigger>
-                             <TooltipContent side="top"><p>Agent Order</p></TooltipContent>
+                             <TooltipContent side="top"><p>Sequence Order</p></TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
                     )}
-                    {/* Agent Selector Popover (Conditional) */}
-                    {orchestrationMode !== "agent-orchestrator" && (
+                    {/* Agent Select & Order Popover (Conditional) */}
+                    {orchestrationMode !== OrchestrationType2.DIRECT_AGENT_INTERACTION && (
                        <Popover>
                           <PopoverTrigger asChild>
                               <Button variant="ghost" size="xs" className="text-gray-400 hover:text-gray-300">
@@ -514,16 +561,16 @@ export default function AgentChat2({
                           </PopoverTrigger>
                           <PopoverContent className="w-60 bg-gray-800 border-gray-700 p-2">
                               <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-                                  <p className="text-xs text-gray-400 mb-1">Select agents for orchestration:</p>
+                                  <p className="text-xs text-gray-400 mb-1">Select and arrange agents for orchestration:</p>
                                   {(() => {
                                     // Agents selected and ordered by customAgentSet
                                     const selectedAgents = customAgentSet
-                                      .map(name => allAgents.find(agent => agent.name === name && !agent.disabled && agent.type !== "manager"))
+                                      .map(name => allAgents.find(agent => agent.name === name &&  agent.type !== "manager"))
                                       .filter(agent => agent !== undefined) as AgentComponentProps[]; // Type assertion
 
                                     // Agents available but not selected
                                     const unselectedAgents = allAgents.filter(
-                                      agent => !agent.disabled && agent.type !== "manager" && !customAgentSet.includes(agent.name)
+                                      agent =>  agent.type !== "manager" && !customAgentSet.includes(agent.name)
                                     );
 
                                     // Combine the lists: selected first, then unselected
@@ -543,7 +590,7 @@ export default function AgentChat2({
                                         onClick={() => setOrRemoveCustomAgent(agent.name)}
                                                 onDragStart={(e) => { if (isSelected) { e.dataTransfer.setData("agent", agent.name); e.currentTarget.classList.add('opacity-50'); } else { e.preventDefault(); }}}
                                         onDragEnd={(e) => e.currentTarget.classList.remove('opacity-50')}
-                                                onDragOver={(e) => { if (isSelected) { e.preventDefault(); e.currentTarget.classList.add('bg-gray-700/30'); }}}
+                                        onDragOver={(e) => { if (isSelected) { e.preventDefault(); e.currentTarget.classList.add('bg-gray-700/30'); }}}
                                         onDragLeave={(e) => e.currentTarget.classList.remove('bg-gray-700/30')}
                                         onDrop={(e) => {
                                                     if (!isSelected) return; // Can only drop onto selected items
@@ -581,7 +628,7 @@ export default function AgentChat2({
               <textarea
                 ref={inputRef}
                 className="flex-grow p-2 text-sm bg-transparent focus:outline-none placeholder-gray-500 resize-none"
-                placeholder={orchestrationMode === 'agent-orchestrator' ? (index >=0 ? `Message ${allAgents[index].name}...` : "Select an agent") : "Enter initial message for orchestration..."}
+                placeholder={orchestrationMode === OrchestrationType2.DIRECT_AGENT_INTERACTION ? (index >=0 ? `Message ${allAgents[index].name}...` : "Select an agent") : "Enter initial message for orchestration..."}
                 name="message"
                 defaultValue={state.input} // Controlled component
                 onBlur={(e) => {
@@ -598,7 +645,7 @@ export default function AgentChat2({
               />
                {/* Send Button & Voice Input */}
                {!agentActive && (
-                   <div className="flex-shrink-0 flex items-center justify-end gap-1 p-1 border-t border-gray-700 mt-1">
+                   <div className="flex-shrink-0 flex items-center justify-between gap-1 p-1 border-t border-gray-700 mt-1">
                        <VoiceComponent
                            handleInputChange={() => {}} // Might not be needed
                            handleVoiceSubmit={voiceMessagesToInput}

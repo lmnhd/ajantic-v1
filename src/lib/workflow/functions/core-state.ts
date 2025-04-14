@@ -5,6 +5,7 @@ import {
   ContextSet,
   ContextContainerProps,
 } from "@/src/lib/types";
+import { OrchestrationType2 } from "@/src/lib/orchestration/types/base";
 import { AnalysisStorage } from "../../storage/analysis-storage";
 import { INDEXEDDB_initDB } from "@/src/lib/indexDB";
 import { toast } from "@/components/ui/use-toast";
@@ -73,8 +74,45 @@ export async function initialize(userId: string, set: Function, get: Function) {
         };
       }
       
+      // Extract and sanitize orchestration state
+      type OrchSettings = {
+        agentOrder?: "sequential" | "seq-reverse" | "random" | "auto" | string | null;
+        rounds?: number;
+        maxRounds?: number;
+        orchestrationMode?: OrchestrationType2;
+        customAgentSet?: string[];
+      };
+      
+      const orchestrationState = ((indexDBState as any).orchestrationState || {}) as OrchSettings;
+      
+      // Handle empty or "auto" agent order
+      const safeAgentOrder = (!orchestrationState.agentOrder || 
+                             orchestrationState.agentOrder === "" || 
+                             orchestrationState.agentOrder === "auto") 
+        ? "sequential" 
+        : orchestrationState.agentOrder;
+      
+      // Create orchestration settings object
+      const orchestrationSettings = {
+        agentOrder: safeAgentOrder as "sequential" | "seq-reverse" | "random",
+        rounds: orchestrationState.rounds || 1,
+        maxRounds: orchestrationState.maxRounds || 10,
+        orchestrationMode: orchestrationState.orchestrationMode || OrchestrationType2.DIRECT_AGENT_INTERACTION,
+        customAgentSet: orchestrationState.customAgentSet || [],
+      };
+      
+      // Include orchestration settings in localState, preserving all existing properties
+      const updatedLocalState = {
+        ...indexDBState.localState,
+        userId,
+        genericData: indexDBState.localState.genericData || {},
+        orchestrationSettings
+      };
+      
+      console.log("[AnalysisStore] Orchestration settings:", orchestrationSettings);
+      
       set({
-        localState: { ...indexDBState.localState, userId, genericData: {} },
+        localState: updatedLocalState,
         currentConversation: indexDBState.currentConversation,
         contextSet: contextSetToUse,
         savedAgentStates: {
@@ -84,22 +122,17 @@ export async function initialize(userId: string, set: Function, get: Function) {
         isInitialized: true,
         converationsForDay: [],
         conversationHistory: [],
-        ...(indexDBState.orchestrationState
-          ? {
-              agentOrder: indexDBState.orchestrationState.agentOrder,
-              rounds: indexDBState.orchestrationState.rounds,
-              maxRounds: indexDBState.orchestrationState.maxRounds,
-              orchestrationMode: indexDBState.orchestrationState.orchestrationMode,
-              customAgentSet: indexDBState.orchestrationState.customAgentSet,
-            }
-          : {
-              agentOrder: "sequential",
-              rounds: 1,
-              maxRounds: 10,
-              orchestrationMode: "agent-orchestrator",
-              customAgentSet: [],
-            }),
+        // Include orchestration settings in the top level for UI components
+        ...orchestrationSettings
       });
+      
+      // Save to localStorage as backup
+      try {
+        localStorage.setItem('orchestrationSettings', JSON.stringify(orchestrationSettings));
+      } catch (error) {
+        console.error("Failed to save orchestration settings to localStorage", error);
+      }
+      
       console.log("[AnalysisStore] Initial state set from IndexDB");
       set({ isLoading: false });
 
@@ -129,49 +162,88 @@ export async function initialize(userId: string, set: Function, get: Function) {
     });
 
     try {
-      const serverStatePromise = AnalysisStorage.loadFromServer(userId);
-      const serverState = (await Promise.race([
-        serverStatePromise,
-        timeoutPromise,
-      ])) as AppFrozenState;
-
-      if (serverState?.localState) {
-        console.log("[AnalysisStore] Server state loaded successfully");
-        set({
-          localState: serverState.localState,
-          // Only use server's currentConversation if we didn't load from IndexDB
-          currentConversation: loadedFromIndexDB ? 
-            (indexDBState as AppFrozenState).currentConversation : 
-            (serverState.currentConversation || []),
-          contextSet: serverState.contextSet || {
-            teamName: "Default Team",
-            sets: [],
-          },
-          savedAgentStates: {
-            agents: [],
-            teams: [],
-          },
-          isInitialized: true,
-          converationsForDay: [],
-          conversationHistory: [],
-        });
-        console.log("[AnalysisStore] State initialized from server");
-
-        get().loadEssentialData(userId);
-
-        // Load frozen states in background
-        get()
-          .loadAllFrozenStateNames(userId)
-          .catch((error: unknown) => {
-            console.error(
-              "[AnalysisStore] Background frozen states load failed:",
-              error
-            );
-          });
-      } else {
-        console.error("[AnalysisStore] Failed to load state from server");
-        throw new Error("Failed to load state from server");
+      const serverStateResponse = await AnalysisStorage.loadFromServer(
+        state.localState.userId
+      );
+      
+      // Extract orchestration state from server with proper typing
+      type OrchSettings = {
+        agentOrder?: "sequential" | "seq-reverse" | "random" | string | null;
+        rounds?: number;
+        maxRounds?: number;
+        orchestrationMode?: OrchestrationType2 | string;
+        customAgentSet?: string[];
+      };
+      
+      const orchestrationState = (serverStateResponse?.orchestrationState || {}) as OrchSettings;
+      
+      // Simple direct mapping with defaults
+      const orchestrationSettings = {
+        // Handle empty or "auto" agent order
+        agentOrder: (!orchestrationState.agentOrder || 
+                     orchestrationState.agentOrder === "" || 
+                     orchestrationState.agentOrder === "auto") 
+          ? "sequential" 
+          : orchestrationState.agentOrder as "sequential" | "seq-reverse" | "random",
+          
+        // Use values or defaults
+        rounds: orchestrationState.rounds || 1,
+        maxRounds: orchestrationState.maxRounds || 10,
+        orchestrationMode: orchestrationState.orchestrationMode as OrchestrationType2 || 
+                          OrchestrationType2.DIRECT_AGENT_INTERACTION,
+        customAgentSet: orchestrationState.customAgentSet || [],
+      };
+      
+      // Update localState with server state plus orchestration settings
+      const updatedLocalState = {
+        ...(serverStateResponse?.localState || {} as AISessionState),
+        genericData: (serverStateResponse?.localState?.genericData || {}),
+        orchestrationSettings
+      };
+      
+      console.log("[AnalysisStore] Orchestration settings from server:", orchestrationSettings);
+      
+      set({
+        localState: updatedLocalState,
+        // Only use server's currentConversation if we didn't load from IndexDB
+        currentConversation: loadedFromIndexDB ? 
+          (indexDBState as AppFrozenState).currentConversation : 
+          (serverStateResponse?.currentConversation || []),
+        contextSet: serverStateResponse?.contextSet || {
+          teamName: "Default Team",
+          sets: [],
+        },
+        savedAgentStates: {
+          agents: [],
+          teams: [],
+        },
+        isInitialized: true,
+        converationsForDay: [],
+        conversationHistory: [],
+        // Include orchestration settings in the top level for UI components
+        ...orchestrationSettings
+      });
+      
+      // Save to localStorage as backup
+      try {
+        localStorage.setItem('orchestrationSettings', JSON.stringify(orchestrationSettings));
+      } catch (error) {
+        console.error("Failed to save orchestration settings to localStorage", error);
       }
+      
+      console.log("[AnalysisStore] State initialized from server");
+
+      get().loadEssentialData(userId);
+
+      // Load frozen states in background
+      get()
+        .loadAllFrozenStateNames(userId)
+        .catch((error: unknown) => {
+          console.error(
+            "[AnalysisStore] Background frozen states load failed:",
+            error
+          );
+        });
     } catch (serverError) {
       console.error("[AnalysisStore] Error loading from server:", serverError);
       // Initialize with empty state rather than failing completely
@@ -198,9 +270,83 @@ export async function initialize(userId: string, set: Function, get: Function) {
         }
       }
       
+      // Extract orchestration state from IndexDB if available
+      type OrchSettings = {
+        agentOrder?: "sequential" | "seq-reverse" | "random" | "auto" | string | null;
+        rounds?: number;
+        maxRounds?: number;
+        orchestrationMode?: OrchestrationType2;
+        customAgentSet?: string[];
+      };
+      
+      const orchestrationState = (loadedFromIndexDB && (indexDBState as any).orchestrationState) ? 
+        (indexDBState as any).orchestrationState as OrchSettings : {} as OrchSettings;
+      
+      // Handle empty or "auto" agent order
+      const safeAgentOrder = (!orchestrationState.agentOrder || 
+                              orchestrationState.agentOrder === "" || 
+                              orchestrationState.agentOrder === "auto") 
+        ? "sequential" 
+        : orchestrationState.agentOrder;
+      
+      // Create orchestration settings object
+      const orchestrationSettings = {
+        agentOrder: safeAgentOrder as "sequential" | "seq-reverse" | "random",
+        rounds: orchestrationState.rounds || 1,
+        maxRounds: orchestrationState.maxRounds || 10,
+        orchestrationMode: orchestrationState.orchestrationMode || OrchestrationType2.DIRECT_AGENT_INTERACTION,
+        customAgentSet: orchestrationState.customAgentSet || [],
+      };
+      
+      // Create localState with embedded orchestration settings
+      // Start with a minimal base state
+      let updatedLocalState: AISessionState;
+      
+      if (loadedFromIndexDB) {
+        // If we loaded from IndexDB, preserve all existing properties
+        updatedLocalState = {
+          ...(indexDBState as AppFrozenState).localState,
+          userId,
+          genericData: (indexDBState as AppFrozenState).localState.genericData || {},
+          orchestrationSettings
+        };
+      } else {
+        // Otherwise create a minimal valid state
+        updatedLocalState = {
+          userId,
+          genericData: {},
+          orchestrationSettings,
+          // Add minimum required properties from AISessionState
+          role: "user",
+          processType: "line",
+          content: "",
+          currentFunction: "",
+          lastFunction: "",
+          currentSong: [],
+          currentTryCount: 0,
+          curBlockNum: 0,
+          curLineNum: 0,
+          groupLines: [],
+          currentModels: [],
+          currentAgents: { name: "", objectives: "", agents: [] },
+          contextSet: { teamName: "Default Team", sets: [] },
+          resultData: { options: [], data: {} },
+          previousData: { options: [], data: {} },
+          rules: [],
+          numOptions: 1,
+          customRequests: [],
+          customRequestModifiers: [],
+          useCustomRequests: false,
+          songId: 0,
+          songName: "",
+          referenceLyricsBlocks: [],
+          referenceWordPlayBlocks: [],
+          newSeeds: false
+        };
+      }
+      
       set({
-        localState: { userId } as AISessionState,
-        // If we loaded from IndexDB (but then had server error), use that conversation 
+        localState: updatedLocalState,
         currentConversation: loadedFromIndexDB ? 
           (indexDBState as AppFrozenState).currentConversation : 
           [],
@@ -212,6 +358,12 @@ export async function initialize(userId: string, set: Function, get: Function) {
         isInitialized: true,
         converationsForDay: [],
         conversationHistory: [],
+        // Preserve orchestration settings from indexDBState if available
+        agentOrder: safeAgentOrder as "sequential" | "seq-reverse" | "random",
+        rounds: orchestrationState.rounds || 1,
+        maxRounds: orchestrationState.maxRounds || 10,
+        orchestrationMode: orchestrationState.orchestrationMode || OrchestrationType2.DIRECT_AGENT_INTERACTION,
+        customAgentSet: orchestrationState.customAgentSet || [],
       });
       console.log(
         "[AnalysisStore] Initialized with empty state due to server error"
@@ -246,7 +398,6 @@ export async function saveState(get: Function, set: Function) {
         maxRounds: state.maxRounds,
         orchestrationMode: state.orchestrationMode,
         customAgentSet: state.customAgentSet,
-        
       },
     };
     await AnalysisStorage.FROZEN_STATE_saveToIndexDB(frozenState);
@@ -262,50 +413,105 @@ export async function megaLoadStateFromBrowserOrServer(
   const state = get();
   //set({ isLoading: true });
   try {
+    // Try to load from IndexDB first
     const indexDBState = await AnalysisStorage.FROZEN_STATE_loadFromIndexDB();
+    
+    // Prepare default data structure
+    type SafeDataSource = {
+      localState: AISessionState;
+      currentConversation: ServerMessage[];
+      contextSet: { teamName: string; sets: any[] };
+      orchestrationState?: {
+        agentOrder?: string;
+        rounds?: number;
+        maxRounds?: number;
+        orchestrationMode?: string | OrchestrationType2;
+        customAgentSet?: string[];
+      };
+    };
+    
+    // Initialize with defaults
+    let dataSource: SafeDataSource = {
+      localState: { userId: state.localState.userId } as AISessionState,
+      currentConversation: [],
+      contextSet: { teamName: "Default Team", sets: [] }
+    };
+    
     if (indexDBState) {
-      set({
-        localState: indexDBState.localState,
-        currentConversation: indexDBState.currentConversation,
-        contextSet: indexDBState.contextSet,
-        isInitialized: true,
-        // Load orchestration state with defaults if not present
-        ...(indexDBState.orchestrationState
-          ? {
-              agentOrder: indexDBState.orchestrationState.agentOrder,
-              rounds: indexDBState.orchestrationState.rounds,
-              maxRounds: indexDBState.orchestrationState.maxRounds,
-              orchestrationMode:
-                indexDBState.orchestrationState.orchestrationMode,
-              customAgentSet: indexDBState.orchestrationState.customAgentSet,
-            }
-          : {
-              agentOrder: "sequential",
-              rounds: 1,
-              maxRounds: 10,
-              orchestrationMode: "agent-orchestrator",
-              customAgentSet: [],
-            }),
-      });
+      // Use IndexDB data if available
+      dataSource = indexDBState;
+      console.log("Loading state from IndexDB");
     } else {
-      const serverState = await AnalysisStorage.loadFromServer(
-        state.localState.userId
-      );
-      set({
-        localState: serverState?.localState || ({} as AISessionState),
-        currentConversation: serverState?.currentConversation || [],
-        contextSet: serverState?.contextSet || {
-          teamName: "Default Team",
-          sets: [],
+      // Try loading from server if not in IndexDB
+      try {
+        const serverStateResponse = await AnalysisStorage.loadFromServer(state.localState.userId);
+        // Check if serverStateResponse exists and is not null before assigning
+        if (serverStateResponse && typeof serverStateResponse === 'object') {
+          dataSource = serverStateResponse as SafeDataSource;
+          console.log("Loading state from server");
+        } else {
+          console.log("No server state found, using fallback");
+        }
+      } catch (error) {
+        console.error("Error loading from server:", error);
+        console.log("Using minimal fallback state due to error");
+      }
+    }
+    
+    // Extract orchestration settings with fallbacks
+    const orchestrationSettings = {
+      // Handle invalid agent orders with default
+      agentOrder: (() => {
+        const order = dataSource.orchestrationState?.agentOrder;
+        if (!order || order === "" || order === "auto") {
+          return "sequential";
+        }
+        return order as "sequential" | "seq-reverse" | "random";
+      })(),
+      
+      // Use values or defaults for other properties
+      rounds: dataSource.orchestrationState?.rounds || 1,
+      maxRounds: dataSource.orchestrationState?.maxRounds || 10,
+      orchestrationMode: (dataSource.orchestrationState?.orchestrationMode as OrchestrationType2) || 
+                        OrchestrationType2.DIRECT_AGENT_INTERACTION,
+      customAgentSet: dataSource.orchestrationState?.customAgentSet || [],
+    };
+    
+    console.log("Using orchestration settings:", orchestrationSettings);
+    
+    // Create complete local state with orchestration settings
+    const updatedLocalState = {
+      ...dataSource.localState,
+      userId: state.localState.userId, // Ensure userId is set
+      genericData: dataSource.localState?.genericData || {},
+      orchestrationSettings
+    };
+    
+    // Update state with all values
+    set({
+      localState: updatedLocalState, 
+      currentConversation: dataSource.currentConversation,
+      contextSet: dataSource.contextSet,
+      isInitialized: true,
+      // Set top-level orchestration properties for UI components
+      ...orchestrationSettings
+    });
+    
+    // Save consistent state back to IndexDB if not loaded from there
+    if (!indexDBState) {
+      const frozenState: AppFrozenState = {
+        localState: updatedLocalState,
+        currentConversation: dataSource.currentConversation,
+        contextSet: dataSource.contextSet,
+        orchestrationState: orchestrationSettings,
+        analysisSet: {
+          contextSet: dataSource.contextSet,
+          analysisName: updatedLocalState.currentAgents?.name || "",
+          userId: updatedLocalState.userId,
         },
-        isInitialized: true,
-        // Set default orchestration state for new or server states
-        agentOrder: "sequential",
-        rounds: 1,
-        maxRounds: 10,
-        orchestrationMode: "agent-orchestrator",
-        customAgentSet: [],
-      });
+      };
+      
+      await AnalysisStorage.FROZEN_STATE_saveToIndexDB(frozenState);
     }
   } finally {
     //set({ isLoading: false });
@@ -318,14 +524,82 @@ export async function updateLocalState(
   set: Function
 ) {
   const state = get();
-  const updatedState = {
-    localState: { ...state.localState, ...newState },
+  
+  // Create properly typed orchestration settings type
+  type OrchestrationSettings = {
+    agentOrder: "sequential" | "seq-reverse" | "random";
+    rounds: number;
+    maxRounds: number;
+    orchestrationMode: OrchestrationType2;
+    customAgentSet: string[];
   };
+  
+  // Perform immutable deep merge with properly created new object references
+  const updatedLocalState: AISessionState = {
+    // Start with a new copy of the full existing state
+    ...state.localState,
+    
+    // Handle orchestrationSettings immutably
+    orchestrationSettings: newState.orchestrationSettings 
+      ? { // If new state includes orchestrationSettings, create a new object with the merged values
+          ...(state.localState.orchestrationSettings || {
+            agentOrder: state.agentOrder as "sequential" | "seq-reverse" | "random",
+            rounds: state.rounds,
+            maxRounds: state.maxRounds,
+            orchestrationMode: state.orchestrationMode,
+            customAgentSet: state.customAgentSet
+          }),
+          ...newState.orchestrationSettings
+        }
+      : state.localState.orchestrationSettings || {
+          // If no orchestrationSettings in new state, ensure defaults are maintained
+          agentOrder: state.agentOrder as "sequential" | "seq-reverse" | "random",
+          rounds: state.rounds,
+          maxRounds: state.maxRounds,
+          orchestrationMode: state.orchestrationMode,
+          customAgentSet: state.customAgentSet
+        },
+    
+    // Handle currentAgents immutably if included in the update
+    currentAgents: newState.currentAgents
+      ? {
+          ...(state.localState.currentAgents || { name: '', objectives: '', agents: [] }),
+          ...newState.currentAgents,
+          // If agents array is being updated, ensure it's a new array reference
+          agents: newState.currentAgents.agents
+            ? [...newState.currentAgents.agents] // Create a new array
+            : state.localState.currentAgents?.agents
+              ? [...state.localState.currentAgents.agents] // Create a new array copy of existing
+              : []
+        }
+      : state.localState.currentAgents,
+    
+    // Handle genericData immutably
+    genericData: newState.genericData
+      ? { ...(state.localState.genericData || {}), ...newState.genericData }
+      : state.localState.genericData || {},
+    
+    // Add other top-level properties from newState directly
+    ...newState
+  };
+  
+  console.log("[core-state] Updating local state...", {
+    hasOrchestrSettings: !!updatedLocalState.orchestrationSettings,
+    orchestrationMode: updatedLocalState.orchestrationSettings?.orchestrationMode,
+    sameRef: updatedLocalState === state.localState, // Should be false (different references)
+    sameOrchestrRef: updatedLocalState.orchestrationSettings === state.localState.orchestrationSettings // Should be false (different references)
+  });
 
   // Update both localState and contextSets in the store
   set({
-    ...updatedState,
+    localState: updatedLocalState,
     contextSet: newState.contextSet || state.contextSet,
+    // Also update top-level orchestration state for UI components
+    agentOrder: updatedLocalState.orchestrationSettings?.agentOrder || state.agentOrder,
+    rounds: updatedLocalState.orchestrationSettings?.rounds || state.rounds,
+    maxRounds: updatedLocalState.orchestrationSettings?.maxRounds || state.maxRounds,
+    orchestrationMode: updatedLocalState.orchestrationSettings?.orchestrationMode || state.orchestrationMode,
+    customAgentSet: updatedLocalState.orchestrationSettings?.customAgentSet || state.customAgentSet
   });
 
   await saveState(get, set);

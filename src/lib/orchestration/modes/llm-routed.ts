@@ -283,7 +283,7 @@ async function _determineNextStepLLM(
 export async function ORCHESTRATION_runLLMRoutedWorkflow(
     initialState: OrchestrationState,
     sessionState: AISessionState,
-    memStore: MemoryVectorStore
+    
 ): Promise<OrchestrationFinalResult> {
     let state = { ...initialState };
     state.status = "running";
@@ -433,8 +433,7 @@ export async function ORCHESTRATION_runLLMRoutedWorkflow(
             const turnResult = await ORCHESTRATION_executeAgentTurn(
                 turnInput,
                 sessionState,
-                state.config,
-                memStore
+                state.config
             );
             logger.log(`Agent ${turnResult.agentName} completed turn.`);
 
@@ -442,11 +441,19 @@ export async function ORCHESTRATION_runLLMRoutedWorkflow(
                 role: "assistant",
                 content: turnResult.response,
                 agentName: turnResult.agentName,
+                agentDirectives: turnResult.agentDirectives,
+                expectedOutput: turnResult.agentDirectives?.expectedOutput
             };
              state.conversationHistory = [...state.conversationHistory, agentResponseMessage];
 
              if(turnResult.contextModified){
-                 logger.log(`Agent turn indicated potential context modification by tool: ${turnResult.agentName}`);
+                 logger.log(`Agent turn indicated context modification: ${turnResult.agentName}`);
+                 
+                 // Only apply context changes if they exist (from manager agent)
+                 if (turnResult.allContextSets && turnResult.allContextSets.length > 0) {
+                     state.contextSets = turnResult.allContextSets;
+                     logger.log(`Updated context sets with ${state.contextSets.length} items`);
+                 }
              }
 
             state.currentRound++;

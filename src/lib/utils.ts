@@ -704,7 +704,6 @@ export function UTILS_isToolAgent(agentType: AgentTypeEnum) {
   return (
     agentType === AgentTypeEnum.CONTEXT_MANAGER ||
     agentType === AgentTypeEnum.RECORDS ||
-    agentType === AgentTypeEnum.RESEARCHER ||
     agentType === AgentTypeEnum.TOOL_OPERATOR ||
     agentType === AgentTypeEnum.DYNAMIC_TOOL
   );

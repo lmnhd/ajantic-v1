@@ -19,7 +19,6 @@ import {
 } from "../../utils";
 import { logger } from "@/src/lib/logger"; // Assuming logger is accessible
 import { AISessionState } from "@/src/lib/types"; // Import AISessionState
-import { MemoryVectorStore } from "langchain/vectorstores/memory"; // Import MemoryVectorStore
 
 /**
  * Runs a multi-agent workflow where agents are processed sequentially
@@ -27,13 +26,12 @@ import { MemoryVectorStore } from "langchain/vectorstores/memory"; // Import Mem
  *
  * @param initialState The initial orchestration state.
  * @param sessionState The broader AI session state (for potential tool use).
- * @param memStore The memory vector store (for potential tool use).
  * @returns A promise resolving to the final result of the orchestration.
  */
 export async function ORCHESTRATION_runSequentialWorkflow(
     initialState: OrchestrationState,
     sessionState: AISessionState, // Add parameter
-    memStore: MemoryVectorStore // Add parameter
+    
 ): Promise<OrchestrationFinalResult> {
     let state = { ...initialState }; // Work with a mutable copy
     state.status = "running";
@@ -120,7 +118,6 @@ export async function ORCHESTRATION_runSequentialWorkflow(
                     turnInput,
                     sessionState, // Pass sessionState
                     state.config, // Pass config from state
-                    memStore      // Pass memStore
                 );
                 logger.log(`Agent ${turnResult.agentName} completed turn.`);
 
@@ -129,13 +126,16 @@ export async function ORCHESTRATION_runSequentialWorkflow(
                     role: "assistant",
                     content: turnResult.response,
                     agentName: turnResult.agentName,
+                    agentDirectives: turnResult.agentDirectives,
+                    expectedOutput: turnResult.agentDirectives?.expectedOutput
                 };
                 state.conversationHistory = [...state.conversationHistory, agentResponseMessage];
 
-                if (turnResult.updatedContextSets) {
-                    // Replace or merge context based on strategy (here, replacing)
+                // With the switch to generateText for agent turns, context updates will be rare
+                // Only manager agents would modify context through generateObject
+                if (turnResult.contextModified && turnResult.updatedContextSets) {
                     state.contextSets = turnResult.updatedContextSets;
-                    logger.log("Context sets updated.");
+                    logger.log("Context sets updated by manager agent.");
                 }
                 // --- End State Update --- //
 

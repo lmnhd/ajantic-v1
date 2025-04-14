@@ -13,6 +13,7 @@ import { ModelArgs } from '@/src/lib/types';
 import { AGENT_FORM_creator, AGENT_FORM_reWriteRequestMessage } from '@/src/lib/post-message-analysis/agent-request-form-creator';
 import { CONVERSATION_store, formatDayName } from '../../../../conversation';
 import { MEMORY_store } from '../../../../agent-memory/store-retrieve';
+import { OrchestrationType2 } from '@/src/lib/orchestration/types';
 
 
 /**
@@ -253,10 +254,10 @@ export async function storeConversationInMemory(
  */
 export function finalizeOrchestration(
   set: (state: Partial<AnalysisState>) => void,
-  order: "sequential" | "seq-reverse" | "random" | "auto",
+  order: "sequential" | "seq-reverse" | "random",
   numRounds: number,
   maxRounds: number,
-  chatMode: OrchestrationType,
+  chatMode: OrchestrationType2,
   customAgentSet: string[]
 ): void {
   set({ 

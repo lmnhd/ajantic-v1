@@ -1,7 +1,16 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { TextChatLogProps } from "../../text-chat-log";
-import { CORE_createTool, CORE_registerPredefinedTool, CORE_executeTool, CORE_listTools } from "./auto-gen-tool_core";
+import { 
+  CORE_createTool, 
+  CORE_registerPredefinedTool, 
+  CORE_executeTool, 
+  CORE_listTools 
+} from "./auto-gen-tool_core";
+import { getCustomToolId, isCustomToolReference } from "../tool-registry/custom-tool-ref";
+import { ToolRegistry } from "../tool-registry/registry";
+import { ToolFactory } from "../tool-registry/factory";
+import { logger } from "@/src/lib/logger";
 
 // Schema for the tool parameters
 const toolParameterSchema = z.array(z.object({
@@ -45,11 +54,58 @@ export const AGENT_TOOLS_autoGenTool = (agentName: string, userId: string, textC
     EXECUTE_TOOL: tool({
       description: "Execute a previously created custom tool",
       parameters: z.object({
-        toolName: z.string(),
+        toolRef: z.string().describe("The tool reference (CUSTOM_TOOL:id) or tool name"),
         parameters: z.record(z.any()).optional()
       }),
       execute: async (params) => {
-        return await CORE_executeTool(agentName, textChatLogs, params);
+        // Check if this is a tool reference
+        if (isCustomToolReference(params.toolRef)) {
+          try {
+            const toolId = getCustomToolId(params.toolRef);
+            const toolEntry = await ToolRegistry.getToolById(toolId);
+            
+            if (!toolEntry) {
+              return JSON.stringify({
+                success: false,
+                message: `Tool with reference ${params.toolRef} not found`
+              });
+            }
+            
+            // Build the tool and execute it
+            const toolName = toolEntry.name;
+            const toolObj = ToolFactory.buildTool(toolEntry);
+            const tool = toolObj[toolName];
+            
+            if (!tool || !tool.execute) {
+              return JSON.stringify({
+                success: false,
+                message: `Failed to build tool ${toolName}`
+              });
+            }
+            
+            const result = await tool.execute(params.parameters || {});
+            return JSON.stringify({
+              success: true,
+              result,
+              toolName
+            });
+          } catch (error: any) {
+            logger.error("Error executing tool from registry", { 
+              error: error.message || "Unknown error", 
+              toolRef: params.toolRef
+            });
+            return JSON.stringify({
+              success: false,
+              message: `Error executing tool: ${error.message || "Unknown error"}`
+            });
+          }
+        } else {
+          // Use legacy execution for backwards compatibility
+          return await CORE_executeTool(agentName, textChatLogs, {
+            toolName: params.toolRef,
+            parameters: params.parameters
+          });
+        }
       }
     }),
     
@@ -59,7 +115,34 @@ export const AGENT_TOOLS_autoGenTool = (agentName: string, userId: string, textC
         category: z.string().optional()
       }),
       execute: async (params) => {
-        return await CORE_listTools(agentName, userId, textChatLogs, params);
+        try {
+          // Get tools from registry
+          const tools = await ToolRegistry.getToolsForAgent(agentName);
+          
+          // Create serializable representations
+          const serializedTools = tools.map(toolEntry => {
+            return {
+              name: toolEntry.name,
+              description: toolEntry.description,
+              reference: `CUSTOM_TOOL:${toolEntry.id}`,
+              parameters: JSON.parse(toolEntry.parameters),
+              implementationType: toolEntry.implementationType
+            };
+          });
+          
+          return JSON.stringify({
+            success: true,
+            tools: serializedTools
+          });
+        } catch (error: any) {
+          logger.error("Error listing tools from registry", { 
+            error: error.message || "Unknown error", 
+            agentName 
+          });
+          
+          // Fall back to legacy tool listing
+          return await CORE_listTools(agentName, userId, textChatLogs, params);
+        }
       }
     })
   };

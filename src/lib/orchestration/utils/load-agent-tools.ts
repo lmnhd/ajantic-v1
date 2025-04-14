@@ -20,7 +20,7 @@ import { ORCH_LEGACY_UTILS_convertToFoundationalProps } from "./legacy_utilities
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { TextChatLogProps } from "../../text-chat-log";
 import { AGENT_TOOLS_perplexity2 } from "../../agent-tools/perplexity2";
-import { AGENT_TOOLS_urlScrape } from "../../agent-tools/agent-url-scrape";
+import { AGENT_TOOLS_urlScrape } from "../../agent-tools/url-scrape/url-scrape";
 import { AGENT_TOOLS_contextSets } from "../../agent-tools/context-sets";
 import {
   AGENT_TOOLS_knowledgeBase_query,
@@ -32,6 +32,7 @@ import { AGENT_TOOLS_loadCustomTools } from "../../agent-tools/auto-gen-tool/loa
 import { CustomToolDefinition } from "../../agent-tools/auto-gen-tool/tool-generator";
 import { LOAD_AGENT_TOOLS } from "../../agent-tools/load-agent-tools";
 import { AGENT_TOOLS_dynamicScript } from "../../agent-tools/dynamic-tool/dynamic-action";
+import { loadCustomToolsForOrchestration } from "./custom-tool-loader";
 
 export async function ORCHESTRATION_load_agent_tools(
   currentAgent: AgentComponentProps,
@@ -231,31 +232,8 @@ export async function ORCHESTRATION_load_agent_tools(
       break;
 
     case AgentTypeEnum.TOOL_OPERATOR:
-      // Only TOOL_OPERATOR agents can use custom tools
-      if (
-        currentAgent.customTools &&
-        Object.keys(currentAgent.customTools).length > 0
-      ) {
-        logger.tool("Loading custom tools for TOOL_OPERATOR agent", {
-          agentName: currentAgent.name,
-          customToolCount: Object.keys(currentAgent.customTools).length,
-          customToolNames: Object.keys(currentAgent.customTools).join(", "),
-        });
-
-        const customTools: CustomToolDefinition[] = Object.values(
-          currentAgent.customTools
-        );
-
-        _result = {
-          ..._result,
-          ...AGENT_TOOLS_loadCustomTools(
-            customTools,
-            currentAgent.name,
-            orchestrationConfig.userId || ""
-          ),
-        };
-      }
-
+      // No need to check customTools - all tools (standard and custom) are now in the tools array
+      
       _result = {
         ..._result,
         ...tools,
@@ -269,7 +247,7 @@ export async function ORCHESTRATION_load_agent_tools(
           currentAgent.name,
           orchestrationConfig.userId || "",
           "",
-          currentAgent.customTools
+          //undefined // No longer passing customTools
         )),
       };
       break;
@@ -299,8 +277,7 @@ export async function ORCHESTRATION_load_agent_tools(
           state,
           currentAgent.name,
           orchestrationConfig.userId || "",
-          "",
-          currentAgent.customTools
+          ""
         ),
       };
       break;
@@ -312,6 +289,38 @@ export async function ORCHESTRATION_load_agent_tools(
         ...tools,
       };
   }
+
+  // Then, add custom tools handling
+  if (currentAgent.tools && currentAgent.tools.length > 0) {
+    try {
+      // Load custom tools from references
+      const customTools = await loadCustomToolsForOrchestration(
+        currentAgent.name,
+        currentAgent.tools as string[],
+        orchestrationConfig.userId || ""
+      );
+      
+      // Merge with standard tools
+      _result = {
+        ..._result,
+        ...customTools
+      };
+      
+      if (Object.keys(customTools).length > 0) {
+        logger.tool("Added custom tools to orchestration", {
+          agentName: currentAgent.name,
+          toolCount: Object.keys(customTools).length,
+          toolNames: Object.keys(customTools).join(", ")
+        });
+      }
+    } catch (error) {
+      logger.error("Error loading custom tools for orchestration", {
+        error, 
+        agentName: currentAgent.name
+      });
+    }
+  }
+
   _result = {
     ..._result,
 
@@ -341,14 +350,17 @@ export async function ORCHESTRATION_load_agent_tools(
   // Log information about custom tools if present, but only for TOOL_OPERATOR agents
   if (
     currentAgent.type === AgentTypeEnum.TOOL_OPERATOR &&
-    currentAgent.customTools &&
-    Object.keys(currentAgent.customTools).length > 0
+    currentAgent.tools?.some(tool => typeof tool === 'string' && tool.startsWith('CUSTOM_TOOL:'))
   ) {
+    const customToolRefs = currentAgent.tools.filter(
+      tool => typeof tool === 'string' && tool.startsWith('CUSTOM_TOOL:')
+    );
+    
     logger.tool("Custom tools available to TOOL_OPERATOR", {
       action: "CUSTOM_TOOLS_LOADED",
       agentName: currentAgent.name,
-      customToolCount: Object.keys(currentAgent.customTools).length,
-      customToolNames: Object.keys(currentAgent.customTools).join(", "),
+      customToolCount: customToolRefs.length,
+      customToolRefs: customToolRefs.join(", "),
     });
   }
 
