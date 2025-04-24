@@ -665,7 +665,6 @@ export type ServerMessage = {
     isInfoRequest: boolean;
     contextSetUpdate?: {
       contextSets: Array<{
-        newOrUpdate: "new" | "update";
         name: string;
         context: string;
       }>;

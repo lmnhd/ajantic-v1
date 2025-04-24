@@ -12,7 +12,8 @@ export type DynamicFormValueType =
   | "undefined"
   | "date"
   | "enum"
-  | "file";
+  | "file"
+  | "enum_or_custom";
 
 export type DynamicFormSchemaValue = {
   key: string;

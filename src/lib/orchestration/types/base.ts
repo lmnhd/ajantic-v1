@@ -101,7 +101,6 @@ export interface AgentTurnResult {
     isInfoRequest: boolean;
     contextSetUpdate?: {
       contextSets: Array<{
-        newOrUpdate: "new" | "update";
         name: string;
         context: string;
         visibleToAgents?: "none" | "all" | string | string[];

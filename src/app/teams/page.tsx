@@ -44,7 +44,7 @@ import { CONVERSATION_store, formatDayName } from "@/src/lib/conversation";
 import { ORCHESTRATION_PAUSE_resetAllFlags } from "@/src/lib/workflow/functions/message-handlers/orchestrated-chat/pause-chat";
 
 import { AutoGenTeam } from "@/src/lib/autogen/autogen";
-import AutogenComponent from "@/components/teams/autogen_component";
+import AutogenComponent, { defaultProcess } from "@/components/teams/autogen_component";
 import { TeamConfig } from "@/components/teams/TeamConfig";
 import { useFullscreen } from "@/src/lib/hooks/useFullscreen";
 import { AIMessage } from "@langchain/core/messages";
@@ -56,9 +56,9 @@ export default function TeamsPage() {
   const { updateNavbar, resetNavbar } = useNavbarStore();
   const { appState, setGlobalMessages, setAppState } = useGlobalStore();
   const { isLoaded, user, isSignedIn } = useUser();
-  const [autoGenWorkflow, setAutoGenWorkflow] = useState<AutoGenTeam | null>(
-    null
-  );
+  // const [autoGenWorkflow, setAutoGenWorkflow] = useState<AutoGenTeam | null>(
+  //   null
+  // );
 
   //const [pauseWaiting, setPauseWaiting] = useState(false);
   const [orchStatus, setOrchStatus] = useState<"paused" | "runone" | "free">(
@@ -129,6 +129,39 @@ export default function TeamsPage() {
 
   const { messages: logMessages, clear: clearLogMessages } = useLogger();
   const [fullscreenRef, toggleFullscreen, isFullscreen] = useFullscreen();
+
+
+  // State management for the automation workflow
+  // Process to automate as described by the user
+  const [automationProcess, setAutomationProcess] =
+    useState<string>(defaultProcess);
+  // Team metadata for identification and organization
+  const [teamName, setTeamName] = useState<string>("");
+  const [teamObjective, setTeamObjective] = useState<string>("");
+  // For tracking and adding workflow modifications
+  const [modificationText, setModificationText] = useState<string>("");
+  const [workflowModifications, setWorkflowModifications] = useState<string[]>(
+    []
+  );
+  // Structure representing the AutoGen workflow configuration
+  const [autoGenWorkflow, setAutoGenWorkflow] = useState<AutoGenTeam | null>(
+    null
+  );
+  const [modificationStore, setModificationStore] = useState<
+    {
+      modifications: string[];
+    }[]
+  >([]);
+  // State for saved workflows functionality
+  const [savedWorkflows, setSavedWorkflows] = useState<
+    Array<{ id: number; name: string }>
+  >([]);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [workflowName, setWorkflowName] = useState("");
+  // Add state to track if workflow has been modified since last save
+  const [workflowModified, setWorkflowModified] = useState(false);
+
+
 
   useEffect(() => {
     // Update navbar when component mounts
@@ -541,8 +574,31 @@ export default function TeamsPage() {
                     >
                       {/* Always render something in this tab even if autoGenWorkflow is null */}
                       {true ? (
-                        <AutogenComponent />
-                      ) : (
+                        <AutogenComponent 
+                          automationProcess={automationProcess}
+                          setAutomationProcess={setAutomationProcess}
+                          teamName={teamName}
+                          setTeamName={setTeamName}
+                          teamObjective={teamObjective}
+                          setTeamObjective={setTeamObjective}
+                          workflowModifications={workflowModifications}
+                          setWorkflowModifications={setWorkflowModifications}
+                          modificationText={modificationText}
+                          setModificationText={setModificationText}
+                          autoGenWorkflow={autoGenWorkflow}
+                          setAutoGenWorkflow={setAutoGenWorkflow}
+                          modificationStore={modificationStore}
+                          setModificationStore={setModificationStore}
+                          workflowModified={workflowModified}
+                          setWorkflowModified={setWorkflowModified}
+                          saveDialogOpen={saveDialogOpen}
+                          setSaveDialogOpen={setSaveDialogOpen}
+                          savedWorkflows={savedWorkflows}
+                          setSavedWorkflows={setSavedWorkflows}
+                          workflowName={workflowName}
+                          setWorkflowName={setWorkflowName}
+                        />
+                        ) : (
                         <div className="flex flex-col items-center justify-center h-full text-gray-400">
                           <p className="mb-4">No AutoGen workflow active</p>
                           <Button

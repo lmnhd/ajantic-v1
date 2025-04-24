@@ -1,5 +1,5 @@
 import React from 'react';
-import { AutoGenAgent, AutoGenTeam } from '../../teams-lib/autogen';
+import { AutoGenAgent, AutoGenTeam } from '@/src/lib/autogen/autogen';
 import { Button } from '@/components/ui/button';
 import { DragDropContext, Draggable, Droppable, DropResult } from '@hello-pangea/dnd';
 import { GripHorizontal, Trash2 } from 'lucide-react';

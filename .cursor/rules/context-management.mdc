@@ -1,0 +1,53 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Context Set Management Summary
+
+This rule outlines the key components and logic involved in managing context sets within the orchestration workflow.
+
+## Core Types
+
+- **`ContextContainerProps`**: The canonical type representing the state of a single context set. Defined in [src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts). It includes properties like `setName`, `text`, `hiddenFromAgents`, and optionally `formSchema`.
+- **`ContextSet`**: A type that groups an array of `ContextContainerProps` under a `teamName`. Also defined in [src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts).
+- **`AISessionState`**: Holds the overall session state, including the current `contextSet: ContextSet`. Managed by the Zustand store in [src/lib/store/analysis-store.ts](mdc:ajantic-v1/ajantic-v1/src/lib/store/analysis-store.ts). Note: There might be redundancy in the store with a top-level `contextSet` alongside `localState.contextSet`.
+
+## Manager Agent Directives
+
+- The Manager agent uses structured output defined by `AgentDirectivesSchema` in [src/lib/orchestration/utils/agent-execution.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/utils/agent-execution.ts).
+- Context modifications are specified using the `contextSetUpdate` field within the directives.
+- This field uses a specific format for each item in its `contextSets` array: `{ name, context, visibleToAgents }`.
+    - Providing a `name` and `context` (non-empty) will create the set if it doesn't exist, or overwrite/update it if it does.
+    - Providing an empty `context` string (`""`) for a given `name` will **delete** the context set if it exists.
+- **`visibleToAgents`**: This field is used for the LLM's convenience and accepts `"none"`, `"all"`, a single agent name, or an array of agent names (`string[]`).
+- The `newOrUpdate` field has been **removed** as it is now redundant.
+
+## Processing Logic
+
+- The main workflow logic resides in `ORCHESTRATION_runManagerDirectedWorkflow` within [src/lib/orchestration/modes/manager-directed.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/modes/manager-directed.ts).
+- This function processes the `agentDirectives.contextSetUpdate` from the manager's turn result.
+- It now handles creation/update/deletion based solely on whether a set with the given `name` exists and whether the provided `context` is empty, ignoring the removed `newOrUpdate` field.
+- It converts the `visibleToAgents` directive into the `hiddenFromAgents: string[]` array stored in the actual `ContextContainerProps` within the state.
+- The separate `processContextSetUpdates` function in `context-processor.ts` has been removed.
+- A text parsing fallback `_parseManagerResponse` exists in the same file but structured output is preferred.
+
+## Special Context Sets
+
+- **"Process Steps"**: Should be created and maintained by the manager, visible only to the manager (`visibleToAgents` set to the manager's name). Guidance is in the manager prompt in [src/lib/orchestration/prompt/orchestration-prompt.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/prompt/orchestration-prompt.ts).
+- **Form Sets**: Created when `isInfoRequest` is true in directives. The form generation logic primarily resides in `AGENT_FORM_creator` ([src/lib/post-message-analysis/agent-request-form-creator.ts](mdc:ajantic-v1/ajantic-v1/src/lib/post-message-analysis/agent-request-form-creator.ts)), which is called via `createInfoRequestForm` ([src/lib/orchestration/actions/form-actions.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/actions/form-actions.ts)) and potentially `ORCHESTRATION_infoRequestToContextFormSet` ([src/lib/orchestration/modes/workflow-helpers.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/modes/workflow-helpers.ts)).
+    - The form creator prompt now emphasizes using `enum` or `enum_or_custom` field types over `string` where possible.
+    - The manager prompt ([src/lib/orchestration/prompt/orchestration-prompt.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/prompt/orchestration-prompt.ts)) instructs the manager to provide example options when requesting information.
+
+## Agent Turn Results (`AgentTurnResult`)
+
+- Defined in [src/lib/orchestration/types/base.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/types/base.ts).
+- **Potential Redundancy**: Contains multiple ways to return context updates (`agentDirectives.contextSetUpdate`, `allContextSets`, `updatedContextSets`, `editedContextSets`). Simplification recommended to primarily use `agentDirectives.contextSetUpdate`.
+- The `newOrUpdate` field has been removed from the type definition for `agentDirectives.contextSetUpdate` within this interface.
+
+## Agent Usage
+
+- Worker agents receive context sets relevant to them (not hidden) formatted within their prompt via `UTILS_convertLineSetsToContext` (defined in [src/lib/utils.ts](mdc:ajantic-v1/ajantic-v1/src/lib/utils.ts)).
+
+
+

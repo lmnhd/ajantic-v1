@@ -257,16 +257,36 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
         </agent_roles>
 
         <available_models>
-            ${modelNames.map(model => `<model>
-                <provider>${model.provider}</provider>
+            ${modelNames.map(model => {
+                // Check for any Google variant and standardize to GOOGLE_G
+                const providerUpperCase = model.provider.toUpperCase();
+                const isGoogleProvider = providerUpperCase.includes('GOOGLE') || providerUpperCase.startsWith('G-');
+                const standardizedProvider = isGoogleProvider ? "GOOGLE_G" : providerUpperCase;
+                
+                return `<model>
+                <provider>${standardizedProvider}</provider>
                 <name>${model.modelName}</name>
-            </model>`).join("\n")}
+            </model>`;
+            }).join("\n")}
         </available_models>
 
         <output_format>Short report in markdown format listing the top 3 model/provider combinations for each agent role in order of best to worst</output_format>
         `
     },
     formatModelResearchOutput: (report: string, modelNames: {provider: string, modelName: string}[]) => {
+        const validModelsList = modelNames.map(m => `"${m.modelName}"`).join(", ");
+        
+        // Process provider names to standardize Google variants
+        const processedProviders = modelNames.map(m => {
+            const providerUpperCase = m.provider.toUpperCase();
+            // Check for any Google variant and standardize to GOOGLE_G
+            return (providerUpperCase.includes('GOOGLE') || providerUpperCase.startsWith('G-')) 
+                ? "GOOGLE_G" 
+                : providerUpperCase;
+        });
+        
+        const validProvidersList = [...new Set(processedProviders)].join(", ");
+        
         return `
         <task>Extract recommended models from research report</task>
 
@@ -274,22 +294,38 @@ export const PROMPT_AUTO_GENERATE_WORKFLOW = {
             ${report}
         </report>
 
-        <output>
-            <models>
-                <model>
-                    <provider>provider name</provider>
-                    <model_name>model name</model_name>
-                </model>
-                <model>
-                    <provider>provider name</provider>
-                    <model_name>model name</model_name>
-                </model>
-                <model>
-                    <provider>provider name</provider>
-                    <model_name>model name</model_name>
-                </model>
-            </models>
-        </output>
+        <valid_model_names>
+            The ONLY valid model names are: ${validModelsList}
+            You MUST use these EXACT model names - do not abbreviate or modify them in any way.
+            For example, use "claude-3-7-sonnet-20250219" NOT "claude-3-7-sonnet"
+        </valid_model_names>
+
+        <providers>
+            The valid providers are: ${validProvidersList}
+            All provider names MUST be in UPPERCASE format (e.g., "ANTHROPIC", "OPENAI").
+            IMPORTANT: For ALL Google models (including gemini, palm, etc.), you MUST use "GOOGLE_G" NOT "GOOGLE".
+        </providers>
+
+        <instructions>
+            <instruction>Extract model assignments from the report</instruction>
+            <instruction>Match each agent to suitable models</instruction>
+            <instruction>Use ONLY the exact model names from the valid_model_names list</instruction>
+            <instruction>ALL provider names must be in UPPERCASE (e.g., "ANTHROPIC", not "Anthropic")</instruction>
+            <instruction>For ANY Google models (gemini, palm, bard), ALWAYS use "GOOGLE_G" as the provider name</instruction>
+            <instruction>Double-check that every modelName matches EXACTLY one of the valid names</instruction>
+            <instruction>If a model in the report doesn't match exactly, map it to the closest matching valid model name</instruction>
+        </instructions>
+
+        <o>
+            <model_assignments>
+                <assignment>
+                    <agentName>agent name</agentName>
+                    <provider>PROVIDER NAME IN UPPERCASE (use GOOGLE_G for Google)</provider>
+                    <modelName>EXACT model name from valid_model_names</modelName>
+                </assignment>
+                <!-- Add more assignments as needed -->
+            </model_assignments>
+        </o>
         `
     },
     agentKnowledgeBase: (processToAutomate: string) => {

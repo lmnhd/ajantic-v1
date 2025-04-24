@@ -1,5 +1,4 @@
-'use server';
-
+"use server";
 import { CoreMessage, generateText, generateObject } from "ai";
 import { z } from "zod";
 import {
@@ -306,24 +305,25 @@ export async function ORCHESTRATION_executeManagerTurn(
     // Context sets schema
     const newContextSetsSchema = z.object({
       contextSets: z.array(z.object({
-        newOrUpdate: z.enum(["new", "update"]).describe("Whether this is a new context set or an update to an existing one."),
-        name: z.string().describe("The name of the context set. If new, this will be the name of the new context set. If update, this will be the name of the context set to update."),
-        context: z.string().describe("The context of the context set. If new, this will be the initial context of the new context set. If update, this will be the updated context of the existing context set. An empty string will remove the context set if exists, or add an empty context set with the given name if it doesn't exist."),
+        name: z.string().describe("The name of the context set. If the set exists, it will be updated. If not, it will be created."),
+        context: z.string().describe("The content for the context set. An empty string will remove the context set if it exists."),
         visibleToAgents: z.union([
-          z.literal("none"),
-          z.literal("all"),
-          z.array(z.string().refine(val => config.agents.filter(agent => agent.type !== AgentTypeEnum.MANAGER).map(agent => agent.name).includes(val))),
-          // Add this option to handle a single agent name string
-          z.string().transform(val => {
-            // If it's a single agent name string (not "none" or "all"), convert it to an array
-            if (val !== "none" && val !== "all") {
-              return [val];
-            }
-            return val;
-          })
+          z.literal("none").describe("Context set is visible to no agents."),
+          z.literal("all").describe("Context set is visible to all agents."),
+          z.array(
+            z.string().refine(
+              (val) => config.agents.map((agent) => agent.name).includes(val),
+              { message: "Invalid agent name in array." }
+            )
+          ).describe("Context set is visible only to the specified list of agent names."),
+          z.string().refine(
+            (val) => config.agents.map((agent) => agent.name).includes(val),
+            { message: "Invalid single agent name." }
+          ).describe("Context set is visible only to the specified single agent name.")
         ])
-          .describe("Specify which agents can see this context set. 'none' means no agents, 'all' means all agents, or an array of specific agent names.")
-          .default("all"),
+        .describe("Specify which agents can see this context set. Use 'none', 'all', an array of agent names, or a single agent name.")
+        .optional()
+        .default("all"),
       })),
     });
 
@@ -450,51 +450,54 @@ export async function ORCHESTRATION_executeManagerTurn(
     };
 
     // Process context modifications - check both info request and explicit updates
-    if ((structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") || 
-        (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate)) {
+    // Context processing logic moved to manager-directed.ts
+    // if ((structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") || 
+    //     (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate)) {
         
-        // Start with current context sets
-        let updatedContextSets = [...contextSets];
+    //     // Start with current context sets
+    //     let updatedContextSets = [...contextSets];
         
-        // Process form request first if needed
-        if (structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") {
-            const { processInfoRequestContextForm } = await import("./context-processor");
-            const formContext = await processInfoRequestContextForm(
-                structuredResponse.object.message,
-                updatedContextSets, // Use already updated context
-                agentConfig,
-                history,
-                orchestrationState.config.teamName
-            );
+    //     // Process form request first if needed
+    //     if (structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") {
+    //         const { processInfoRequestContextForm } = await import("./context-processor");
+    //         const formContext = await processInfoRequestContextForm(
+    //             structuredResponse.object.message,
+    //             updatedContextSets, // Use already updated context
+    //             agentConfig,
+    //             history,
+    //             orchestrationState.config.teamName
+    //         );
             
-            // Update the context for the next step
-            updatedContextSets = formContext.updatedContextSets;
+    //         // Update the context for the next step
+    //         updatedContextSets = formContext.updatedContextSets;
             
-            // Append form prompt text
-            result.response += "\n\n**Please fill out the form below to provide the requested information.**";
-        }
+    //         // Append form prompt text
+    //         result.response += "\n\n**Please fill out the form below to provide the requested information.**";
+    //     }
         
-        // Then process explicit context updates if needed
-        if (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate) {
-            const { processContextSetUpdates } = await import("./context-processor");
-            const updatedContext = processContextSetUpdates(
-                structuredResponse.object.contextSetUpdate.contextSets,
-                updatedContextSets, // Use already updated context including any form additions
-                config.agents,
-                orchestrationState.config.teamName
-            );
+    //     // Then process explicit context updates if needed
+    //     // Removed call to processContextSetUpdates
+    //     // if (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate) {
+    //     //     // const { processContextSetUpdates } = await import("./context-processor"); // Removed import
+    //     //     const updatedContext = processContextSetUpdates(
+    //     //         structuredResponse.object.contextSetUpdate.contextSets,
+    //     //         updatedContextSets, // Use already updated context including any form additions
+    //     //         config.agents,
+    //     //         orchestrationState.config.teamName
+    //     //     );
             
-            // Update with final context
-            updatedContextSets = updatedContext.updatedContextSets;
-        }
+    //     //     // Update with final context
+    //     //     updatedContextSets = updatedContext.updatedContextSets;
+    //     // }
         
-        // Set result with the fully processed context
-        result.allContextSets = updatedContextSets;
-        result.contextSet = {
-            teamName: orchestrationState.config.teamName,
-            sets: updatedContextSets
-        };
-    }
+    //     // Set result with the fully processed context
+    //     // This is now handled within manager-directed.ts
+    //     // result.allContextSets = updatedContextSets;
+    //     // result.contextSet = {
+    //     //     teamName: orchestrationState.config.teamName,
+    //     //     sets: updatedContextSets
+    //     // };
+    // }
 
     // Update UI state after manager turn completes
     await updateUIState(orchestrationState);

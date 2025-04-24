@@ -289,8 +289,44 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
 
   handleTeamAutoGen: async (props: AutoGenWorkflowProps) => {
     console.log("!!!HANDLE_TEAM_AUTOGEN!!!", props);
-    return await TEAM_autogen_create_workflow(props, get().localState.userId)
-    //return props;
+    const result = await TEAM_autogen_create_workflow(props, get().localState.userId);
+    
+    // If we have results and they've been approved, update the store with the new team and context
+    if (result.outlineApproved && result.resultTeam) {
+      console.log("UPDATING STORE WITH TEAM:", {
+        teamName: result.resultTeam.name,
+        agents: result.resultTeam.agents.map(a => a.name),
+        orchestrationType: result.resultTeam.orchestrationType,
+        contextSets: result.resultContext || []
+      });
+      
+      set({ 
+        localState: {
+          ...get().localState,
+          currentAgents: result.resultTeam as Team,
+          contextSet: {
+            teamName: result.resultTeam.name,
+            sets: result.resultContext || []
+          }
+        },
+        contextSet: {
+          teamName: result.resultTeam.name,
+          sets: result.resultContext || []
+        },
+        // Set orchestration mode from the team
+        orchestrationMode: result.resultTeam.orchestrationType || OrchestrationType2.SEQUENTIAL_WORKFLOW,
+        // Reset the agent set to include all agents
+        customAgentSet: result.resultTeam.agents.map(agent => agent.name)
+      });
+      
+      // Save state to persist changes
+      setTimeout(() => {
+        console.log("SAVING STATE AFTER TEAM UPDATE");
+        get().saveState();
+      }, 500);
+    }
+    
+    return result;
   },
 
   currentConversation: [],

@@ -1,5 +1,7 @@
 import React from 'react';
-import { AutoGenTeam } from '../../teams-lib/autogen';
+import { AutoGenTeam } from '@/src/lib/autogen/autogen';
+import { OrchestrationType2 } from '@/src/lib/orchestration/types';
+import { getOrchestrationModeName } from '../agentChat2';
 
 interface TeamInfoTabProps {
   localWorkflow: AutoGenTeam;
@@ -46,9 +48,12 @@ const TeamInfoTab: React.FC<TeamInfoTabProps> = ({
             className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
             aria-label="Orchestration Type"
           >
-            <option value="sequential">Sequential</option>
-            <option value="random">Random</option>
-            <option value="auto">Auto</option>
+            {Object.values(OrchestrationType2).map((type) => (
+              <option key={type} value={type}>
+                {getOrchestrationModeName(type)}
+              </option>
+            ))}
+
           </select>
         </div>
       </div>

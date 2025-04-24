@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { AutoGenTeam } from '../../teams-lib/autogen';
+import { AutoGenTeam } from '@/src/lib/autogen/autogen';
 import { DragDropContext, Draggable, Droppable, DropResult } from '@hello-pangea/dnd';
 import { Trash2, GripVertical } from 'lucide-react';
 

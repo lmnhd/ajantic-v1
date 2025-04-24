@@ -1,5 +1,5 @@
 import React from 'react';
-import { AutoGenAgent, AutoGenTeam } from '../../teams-lib/autogen';
+import { AutoGenAgent, AutoGenTeam } from '@/src/lib/autogen/autogen';
 import AgentCard from './AgentCard';
 import AgentForm from './AgentForm';
 import { AgentFormData } from './types';

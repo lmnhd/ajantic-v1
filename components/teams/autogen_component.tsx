@@ -88,24 +88,8 @@ const fetchWorkflowById = async (id: string) => {
   }
 };
 
-export default function AutogenComponent() {
-  const { user } = useUser();
-  const [modificationStore, setModificationStore] = useState<
-    {
-      modifications: string[];
-    }[]
-  >([]);
-  // State for saved workflows functionality
-  const [savedWorkflows, setSavedWorkflows] = useState<
-    Array<{ id: number; name: string }>
-  >([]);
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [workflowName, setWorkflowName] = useState("");
-  // Add state to track if workflow has been modified since last save
-  const [workflowModified, setWorkflowModified] = useState(false);
-
   // Default process description for testing email automation
-  const defaultProcess = `
+  export const defaultProcess = `
 AI-Automated ClickBank Affiliate Marketing Workflow:
 
 Product Research Agent:
@@ -175,24 +159,57 @@ Sideways Content: Relate content to the core product indirectly to attract a wid
 Constant Testing: Analyze data and continuously adjust keywords, content, and distribution strategies for optimal performance.
 `;
 
-   const defaultProcessSimple = `Simple workflow to test the system. Design a simple automated process that searches for a specific product on a website and then emails the user with the results. Keep the steps under 5 and create only 1 new agent with no knowledgebase.`;
+   export const defaultProcessSimple = `Simple workflow to test the system. Design a simple automated process that searches for a specific product on a website and then emails the user with the results. Keep the steps under 5 and create only 1 new agent with no knowledgebase.`;
 
-  // State management for the automation workflow
-  // Process to automate as described by the user
-  const [automationProcess, setAutomationProcess] =
-    useState<string>(defaultProcess);
-  // Team metadata for identification and organization
-  const [teamName, setTeamName] = useState<string>("");
-  const [teamObjective, setTeamObjective] = useState<string>("");
-  // For tracking and adding workflow modifications
-  const [modificationText, setModificationText] = useState<string>("");
-  const [workflowModifications, setWorkflowModifications] = useState<string[]>(
-    []
-  );
-  // Structure representing the AutoGen workflow configuration
-  const [autoGenWorkflow, setAutoGenWorkflow] = useState<AutoGenTeam | null>(
-    null
-  );
+export default function AutogenComponent({
+  automationProcess,
+  setAutomationProcess,
+  teamName,
+  setTeamName,
+  teamObjective,
+  setTeamObjective,
+  workflowModifications,
+  setWorkflowModifications,
+  modificationText,
+  setModificationText,
+  autoGenWorkflow,
+  setAutoGenWorkflow,
+  modificationStore,
+  setModificationStore,
+  workflowModified,
+  setWorkflowModified,
+  saveDialogOpen,
+  setSaveDialogOpen,
+  savedWorkflows,
+  setSavedWorkflows,
+  workflowName,
+  setWorkflowName,
+}: {
+  automationProcess: string;
+  setAutomationProcess: (process: string) => void;
+  teamName: string;
+  setTeamName: (name: string) => void;
+  teamObjective: string;
+  setTeamObjective: (objective: string) => void;
+  workflowModifications: string[];
+  setWorkflowModifications: (modifications: string[]) => void;
+  modificationText: string;
+  setModificationText: (text: string) => void;
+  autoGenWorkflow: AutoGenTeam | null;
+  setAutoGenWorkflow: (workflow: AutoGenTeam | null) => void;
+  modificationStore: { modifications: string[] }[];
+  setModificationStore: (store: { modifications: string[] }[]) => void;
+  workflowModified: boolean;
+  setWorkflowModified: (modified: boolean) => void;
+  saveDialogOpen: boolean;
+  setSaveDialogOpen: (open: boolean) => void;
+  savedWorkflows: { id: number; name: string }[];
+  setSavedWorkflows: (workflows: { id: number; name: string }[]) => void;
+  workflowName: string;
+  setWorkflowName: (name: string) => void;
+}) {
+  const { user } = useUser();
+
 
   // Access the analysis store for team management functions and agent data
   const { handleTeamAutoGen, localState } = useAnalysisStore();
@@ -237,11 +254,17 @@ Constant Testing: Analyze data and continuously adjust keywords, content, and di
     const _outline: AutoGenTeam = JSON.parse(
       props.outlineObjectString ?? "{}"
     ) as AutoGenTeam;
+    
+    // Map orchestration type to expected string format
+    const mapOrchestrationToAgentOrder = (orchType: string): "sequential" | "seq-reverse" | "random" => {
+      if (orchType.includes("SEQUENTIAL")) return "sequential";
+      if (orchType.includes("REVERSE")) return "seq-reverse";
+      if (orchType.includes("RANDOM")) return "random";
+      return "sequential"; // Default fallback
+    };
+    
     useAnalysisStore.setState({
-      agentOrder: _outline.orchestrationType as
-        | "sequential"
-        | "seq-reverse"
-        | "random",
+      agentOrder: mapOrchestrationToAgentOrder(_outline.orchestrationType?.toString() || ""),
       customAgentSet: _outline.agentSequence,
       localState: _newState,
     });
@@ -284,8 +307,7 @@ Constant Testing: Analyze data and continuously adjust keywords, content, and di
       setWorkflowModifications([]);
       setModificationStore(result.modificationStore ?? []);
       setWorkflowModified(true); // Mark workflow as modified after generation
-      // Set state team object to the new team
-      setTeam(result); // Pass the full result object
+      
       alert("Team auto-generation successful");
     }
   };

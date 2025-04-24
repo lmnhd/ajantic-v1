@@ -7,8 +7,7 @@ import TeamInfoTab from './TeamInfoTab';
 import NewAgentsTab from './NewAgentsTab';
 import AgentSequenceTab from './AgentSequenceTab';
 import ProcessStepsTab from './ProcessStepsTab';
-import { AutoGenAgent, AutoGenTeam } from '../../teams-lib/autogen';
-
+import { AutoGenAgent, AutoGenTeam } from '@/src/lib/autogen/autogen';
 interface AutoGenWorkflowComponentProps {
   autoGenWorkflow: AutoGenTeam;
   setAutoGenWorkflow: (workflow: AutoGenTeam) => void;

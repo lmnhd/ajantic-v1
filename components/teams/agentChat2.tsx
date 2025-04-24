@@ -130,7 +130,24 @@ function agentChatReducer(
       return state;
   }
 }
-
+export const getOrchestrationModeName = (mode: OrchestrationType2): string => {
+  switch (mode) {
+    case OrchestrationType2.DIRECT_AGENT_INTERACTION:
+      return "Direct Agent";
+    case OrchestrationType2.SEQUENTIAL_WORKFLOW:
+      return "Sequential";
+    case OrchestrationType2.REVERSE_WORKFLOW:
+      return "Reverse";
+    case OrchestrationType2.RANDOM_WORKFLOW:
+      return "Random";
+    case OrchestrationType2.LLM_ROUTED_WORKFLOW:
+      return "LLM Routed";
+    case OrchestrationType2.MANAGER_DIRECTED_WORKFLOW:
+      return "Agentic";
+    default:
+      return String(mode);
+  }
+};
 export default function AgentChat2({
   currentConversation,
   setCurrentConversation,
@@ -413,24 +430,7 @@ export default function AgentChat2({
   }, [orchestrationMode, setOrchestrationMode]);
 
   // Helper function to get a user-friendly name for the orchestration mode
-  const getOrchestrationModeName = (mode: OrchestrationType2): string => {
-    switch (mode) {
-      case OrchestrationType2.DIRECT_AGENT_INTERACTION:
-        return "Direct Agent";
-      case OrchestrationType2.SEQUENTIAL_WORKFLOW:
-        return "Sequential";
-      case OrchestrationType2.REVERSE_WORKFLOW:
-        return "Reverse";
-      case OrchestrationType2.RANDOM_WORKFLOW:
-        return "Random";
-      case OrchestrationType2.LLM_ROUTED_WORKFLOW:
-        return "LLM Routed";
-      case OrchestrationType2.MANAGER_DIRECTED_WORKFLOW:
-        return "Agentic";
-      default:
-        return String(mode);
-    }
-  };
+  
 
   const handleToggleAgentOrder = useCallback(() => {
     setAgentOrder(agentOrder === 'sequential' ? 'seq-reverse' : agentOrder === 'seq-reverse' ? 'random' : 'sequential');

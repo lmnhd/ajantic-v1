@@ -119,6 +119,7 @@ export type AutoGenWorkflowProps = {
   };
   resultTeam?: Team;
   resultContext?: ContextContainerProps[];
+  orchestrationType?: OrchestrationType2;
   modificationStore?: {
     modifications: string[];
   }[];
@@ -191,9 +192,27 @@ export const TEAM_autogen_create_workflow = async (
       let outlineObject = JSON.parse(outlineObjectString ?? "{}") as AutoGenTeam;
       team.name = outlineObject?.team_name ?? "";
       team.objectives = outlineObject?.team_objective ?? "";
-      
-      // Directly use the orchestrationType from the outline
-      team.orchestrationType = outlineObject?.orchestrationType || OrchestrationType2.SEQUENTIAL_WORKFLOW;
+
+      if (outlineObject?.orchestrationType) {
+        if ((outlineObject?.orchestrationType as string).includes("auto")) {
+          outlineObject.orchestrationType = OrchestrationType2.MANAGER_DIRECTED_WORKFLOW;
+        }
+        if ((outlineObject?.orchestrationType as string).includes("sequential")) {
+          outlineObject.orchestrationType = OrchestrationType2.SEQUENTIAL_WORKFLOW;
+        }
+        if ((outlineObject?.orchestrationType as string).includes("random")) {
+          outlineObject.orchestrationType = OrchestrationType2.RANDOM_WORKFLOW;
+        }
+        if ((outlineObject?.orchestrationType as string).includes("reverse")) {
+          outlineObject.orchestrationType = OrchestrationType2.REVERSE_WORKFLOW;
+        }
+        if ((outlineObject?.orchestrationType as string).includes("llm")) {
+          outlineObject.orchestrationType = OrchestrationType2.LLM_ROUTED_WORKFLOW;
+        }
+      }
+      console.log("!!!outlineObject!!!", outlineObject);
+
+      team.orchestrationType = outlineObject?.orchestrationType ?? OrchestrationType2.SEQUENTIAL_WORKFLOW;
       
       // add only the agents found in the sequence
       team.agents =
@@ -258,7 +277,7 @@ export const TEAM_autogen_create_workflow = async (
         (
           getModelList("array") as { provider: string; modelName: string }[]
         ).map((model) => ({
-          provider: model.provider,
+          provider: model.provider.toUpperCase(),
           modelName: model.modelName,
         }))
       );
@@ -279,7 +298,19 @@ export const TEAM_autogen_create_workflow = async (
             (a) => a.name === assignment.agentName
           );
           if (agent) {
-            agent.modelArgs = UTILS_getModelArgsByName(assignment.modelName);
+            // Ensure provider is in uppercase to match ModelProviderEnum
+            const provider = assignment.provider.toUpperCase();
+            
+            // Special case for Google provider - detect any Google variant
+            const isGoogleProvider = provider.includes('GOOGLE') || provider.startsWith('G-');
+            const finalProvider = isGoogleProvider ? "GOOGLE_G" : provider;
+            
+            // Get model args by provider and model name
+            const modelArgs = {
+              ...UTILS_getModelArgsByName(assignment.modelName),
+              provider: finalProvider as ModelProviderEnum
+            };
+            agent.modelArgs = modelArgs;
           }
         }
       }
@@ -349,11 +380,43 @@ export const TEAM_autogen_create_workflow = async (
         returnedContextSetsCount: context.length
       });
       
+      // Final provider name check - ensure any Google-related provider is converted to GOOGLE_G
+      team.agents = team.agents.map(agent => {
+        if (agent.modelArgs && 
+            (String(agent.modelArgs.provider).toUpperCase().includes('GOOGLE') || 
+             String(agent.modelArgs.provider).toUpperCase().startsWith('G-'))) {
+          console.log(`Converting provider from ${agent.modelArgs.provider} to GOOGLE_G for agent ${agent.name}`);
+          return {
+            ...agent,
+            modelArgs: {
+              ...agent.modelArgs,
+              provider: "GOOGLE_G" as ModelProviderEnum
+            }
+          };
+        }
+        return agent;
+      });
+      
+      // Add detailed debugging info for tracking orchestration and context issues
+      console.log("FINAL TEAM DETAILS BEFORE RETURN:", {
+        name: team.name,
+        objectives: team.objectives,
+        agentCount: team.agents.length,
+        orchestrationType: team.orchestrationType,
+        contextSets: {
+          count: team.contextSets.length,
+          names: team.contextSets.map(cs => cs.setName),
+          contentSizes: team.contextSets.map(cs => cs.text?.length || 0)
+        },
+        agentNames: team.agents.map(a => a.name)
+      });
+      
       return {
         processToAutomate,
         readyMadeAgents,
         outlineObjectString: outlineObjectString,
         outlineApproved: outlineApproved,
+        orchestrationType: team.orchestrationType,
         resultTeam: team,
         resultContext: team.contextSets, // Ensure we're returning the same context objects
       } as AutoGenWorkflowProps;
@@ -567,25 +630,41 @@ export const TEAM_autogen_create_agent = async (
               suggestedOutputs: toolRequest.suggestedOutputs,
             } as ToolRequest;
 
-            // Generate the tool definition
-            const toolDef = await CORE_generateCustomToolDefinition(
-              unifiedRequest
-            );
+            // Check if a tool with this name already exists for this user
+            const existingTool = await ToolRegistry.findToolByName(toolRequest.toolName, userId);
+            let toolRef = '';
+            let isReused = false;
             
-            // Register the tool in the central registry
-            const toolRef = await ToolRegistry.registerTool(
-              toolDef.name,
-              toolDef.description,
-              toolDef.parameters,
-              toolDef.implementation || "",
-              "function",
-              {
-                agentId: agentProperties.object.name,
-                userId: userId,
-                source: "autogen",
-                createdAt: new Date().toISOString()
-              }
-            );
+            if (existingTool) {
+              // Use the existing tool
+              toolRef = createCustomToolReference(existingTool.id);
+              isReused = true;
+              logger.tool("Using existing custom tool", {
+                toolId: existingTool.id,
+                toolName: existingTool.name,
+                agent: agentProperties.object.name
+              });
+            } else {
+              // Generate a new tool definition
+              const toolDef = await CORE_generateCustomToolDefinition(
+                unifiedRequest
+              );
+              
+              // Register the tool in the central registry
+              toolRef = await ToolRegistry.registerTool(
+                toolDef.name,
+                toolDef.description,
+                toolDef.parameters,
+                toolDef.implementation || "",
+                "function",
+                {
+                  agentId: agentProperties.object.name,
+                  userId: userId,
+                  source: "autogen",
+                  createdAt: new Date().toISOString()
+                }
+              );
+            }
             
             // Add the tool reference to the agent's tools array
             if (!agentTools.includes(toolRef)) {
@@ -595,7 +674,8 @@ export const TEAM_autogen_create_agent = async (
             return {
               toolId: toolRef.split(':')[1],
               toolRef,
-              name: toolDef.name
+              name: toolRequest.toolName,
+              reused: isReused
             };
           }
         );
@@ -603,9 +683,15 @@ export const TEAM_autogen_create_agent = async (
         // Wait for all tool registrations to complete
         const registeredTools = await Promise.all(toolRequestPromises);
         
+        // Count new vs reused tools
+        const newTools = registeredTools.filter(t => !t.reused);
+        const reusedTools = registeredTools.filter(t => t.reused);
+        
         // Log the created tools
-        logger.tool("Created Custom Tools", {
+        logger.tool("Created/Reused Custom Tools", {
           count: registeredTools.length,
+          newCount: newTools.length,
+          reusedCount: reusedTools.length,
           agent: agentProperties.object.name,
           toolReferences: registeredTools.map(t => t.toolRef),
           toolNames: registeredTools.map(t => t.name)
@@ -613,10 +699,11 @@ export const TEAM_autogen_create_agent = async (
 
         // Add a special log just for debugging
         console.log(
-          `DEBUG: Created ${
-            registeredTools.length
-          } custom tools for ${agentProperties.object.name}:`,
-          registeredTools.map(t => t.name)
+          `DEBUG: Tools for ${agentProperties.object.name}: ` +
+          registeredTools.map(t => `${t.name}${t.reused ? ' (reused)' : ' (new)'}`).join(', ')
+        );
+        console.log(
+          `SUMMARY: ${registeredTools.length} total tools - Created ${newTools.length} new, reused ${reusedTools.length} existing.`
         );
       } catch (error) {
         logger.error("Error creating custom tools", {
@@ -801,6 +888,34 @@ export const TEAM_autogen_assign_models = async (
   if (!modelResearch) {
     return null;
   }
+  
+  // Helper function to map shortened model names to their full versions
+  const mapToFullModelName = (shortName: string): string => {
+    // Map for common short names to their full versions
+    const modelNameMap: Record<string, string> = {
+      "claude-3-7-sonnet": "claude-3-7-sonnet-20250219",
+      "claude-3-5-sonnet": "claude-3-5-sonnet-20240620",
+      "gpt-4o": "gpt-4o",
+      "gpt-4.5": "gpt-4.5-preview",
+      "gemini-1.5-pro": "models/gemini-1.5-pro-latest",
+      "gemini-2.5-pro": "models/gemini-2.5-pro-exp-03-25"
+    };
+    
+    // Return the mapped value if it exists, otherwise return the original
+    return modelNameMap[shortName] || shortName;
+  };
+  
+  // Define the response type for better type safety
+  interface ModelAssignment {
+    agentName: string;
+    provider: string;
+    modelName: string;
+  }
+  
+  interface ModelAssignmentResponse {
+    model_assignments: ModelAssignment[];
+  }
+  
   const modelResearchOutput = await generateObject({
     model: await MODEL_getModel_ai(
       UTILS_getModelArgsByName(UTILS_getModelsJSON().OpenAI["gpt-4o-mini"].name)
@@ -809,8 +924,51 @@ export const TEAM_autogen_assign_models = async (
       model_assignments: z.array(
         z.object({
           agentName: z.string(),
-          provider: z.enum(Array.from(new Set(Object.keys(UTILS_getModelsJSON()))) as [string, ...string[]]),
-          modelName: z.enum([...(getModelList("array") as {provider: string, modelName: string}[]).map(model => model.modelName)] as [string, ...string[]]),
+          provider: z.string()
+            .transform(val => {
+              // Convert GOOGLE_G to GOOGLE for validation
+              return val === "GOOGLE_G" ? "GOOGLE" : val;
+            })
+            .pipe(z.enum(Array.from(new Set(Object.keys(UTILS_getModelsJSON()).map(key => key.toUpperCase()))) as [string, ...string[]])),
+          modelName: z.string()
+            .refine(
+              (val) => {
+                // Get all valid model names
+                const validModelNames = (getModelList("array") as {provider: string, modelName: string}[])
+                  .map(model => model.modelName);
+                
+                // First try exact match
+                if (validModelNames.includes(val)) {
+                  return true;
+                }
+                
+                // Then try partial match - check if any valid model name contains this value
+                // or vice versa
+                return validModelNames.some(modelName => 
+                  modelName.includes(val) || val.includes(modelName)
+                );
+              },
+              {
+                message: "Model name must match or be contained in one of the valid model names",
+              }
+            )
+            .transform(val => {
+              // Get all valid model names
+              const validModelNames = (getModelList("array") as {provider: string, modelName: string}[])
+                .map(model => model.modelName);
+              
+              // First check for exact match
+              if (validModelNames.includes(val)) {
+                return val;
+              }
+              
+              // Then find the closest match
+              const closestMatch = validModelNames.find(modelName => 
+                modelName.includes(val) || val.includes(modelName)
+              );
+              
+              return closestMatch || val;
+            }),
         })
       ),
     }),
@@ -818,6 +976,11 @@ export const TEAM_autogen_assign_models = async (
       modelResearch ?? "",
       modelNames
     ),
+    providerOptions: {
+      openai: {
+        response_format: { type: "json_object" }
+      }
+    }
   });
 
   return modelResearchOutput.object.model_assignments;

@@ -555,9 +555,8 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
     <FIELD name="contextSetUpdate" type="object" optional="true">
       <SUBFIELD name="contextSets" type="array">
         <ITEM>
-          <PROPERTY name="newOrUpdate" type="string">Either "new" to create a new context set or "update" to modify an existing one.</PROPERTY>
-          <PROPERTY name="name" type="string">The name of the context set. If new, this will be the name of the new context set. If update, this will be the name of the context set to update.</PROPERTY>
-          <PROPERTY name="context" type="string">The content of the context set. If new, this will be the initial content. If update, this will replace the existing content. An empty string will remove the context set if it exists, or add an empty context set with the given name if it doesn't exist.</PROPERTY>
+          <PROPERTY name="name" type="string">The name of the context set. Providing a name will create the set if it doesn't exist, or overwrite it if it does.</PROPERTY>
+          <PROPERTY name="context" type="string">The content for the context set. An empty string will remove the context set if it exists (it will NOT create an empty set).</PROPERTY>
           <PROPERTY name="visibleToAgents" type="string or array">Specify which agents can see this context set. Only share with agents who actually need the information: use a specific agent name, or an array of specific agent names. Avoid using "all" unless the information is truly needed by every agent. Use "none" to hide from all agents.</PROPERTY>
         </ITEM>
       </SUBFIELD>
@@ -587,13 +586,11 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
       contextSetUpdate: {
         contextSets: [
           {
-            newOrUpdate: "new",
             name: "Process Steps",
             context: "1. Gather initial requirements from user [Completed]\n2. Define project scope [In Progress]\n3. Design workflow [Pending]\n4. Implement solution [Pending]\n5. Review and finalize [Pending]",
             visibleToAgents: "${props.currentAgent.name}"
           },
           {
-            newOrUpdate: "new",
             name: "Data Analysis Results",
             context: "Three key trends identified in user behavior:\n1. Higher engagement during weekends\n2. Drop-off after 30 days of use\n3. Correlation between notification frequency and retention",
             visibleToAgents: ["Research Assistant", "Data Analyst"]
@@ -630,7 +627,7 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
   </CORE_RESPONSIBILITIES>
   
   <PROCESS_MANAGEMENT>
-    <INSTRUCTION>IMPORTANT: If process steps already exist in the context, treat them as suggestions rather than requirements</INSTRUCTION>
+    <INSTRUCTION>IMPORTANT: If process steps or guidelines already exist in the context, treat them as suggestions rather than requirements</INSTRUCTION>
     <INSTRUCTION>For new requests: Feel free to modify, remove, or entirely recreate existing process steps to better align with the current request</INSTRUCTION>
     <INSTRUCTION>For ongoing tasks: Continue following the existing steps if they still make sense for the current objective</INSTRUCTION>
     <INSTRUCTION>Analyze the user's request first, then decide if existing steps are appropriate or need adjustment</INSTRUCTION>
@@ -655,6 +652,7 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
   <USER_COMMUNICATION>
     <INSTRUCTION>Only contact the user when you cannot proceed without user input</INSTRUCTION>
     <INSTRUCTION>When requesting information from the user, set messageTo: "user"</INSTRUCTION>
+    <INSTRUCTION>If setting isInfoRequest: true, include potential example options in your message to guide the user and the form generator. Example: "What type of document is this? (e.g., Invoice, Receipt, Contract, Other)"</INSTRUCTION>
     <INSTRUCTION>Try to gather all needed information from the user in a single request</INSTRUCTION>
     <INSTRUCTION>Provide final results directly to the user when the workflow is complete</INSTRUCTION>
   </USER_COMMUNICATION>

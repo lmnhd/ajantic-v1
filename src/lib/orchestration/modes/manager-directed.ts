@@ -11,8 +11,7 @@
 
 // Use the 'ORCHESTRATION_runLLMRoutedWorkflow' workflow function for reference on how to structure the process and code.
 
-import { AGENT_FORM_creator } from "../../post-message-analysis/agent-request-form-creator";
-import { UTILS_TEAMS_infoRequestContextFormSet } from "../../teams/lib/teams-utils";
+
 import {
     AgentTurnInput,
     AgentTurnResult,
@@ -32,6 +31,10 @@ import {
 import { logger } from "@/src/lib/logger";
 import { AISessionState, AgentComponentProps, AgentTypeEnum, ContextContainerProps, ServerMessage } from "@/src/lib/types";
 
+// Import the server action
+
+import { ORCHESTRATION_infoRequestToContextFormSet } from "./workflow-helpers";
+
 // --- Interfaces --- //
 
 // Interface for the result of parsing the manager's decision
@@ -43,7 +46,6 @@ interface ManagerDirectiveResult {
     isInfoRequest: boolean; // Did the manager indicate an info request?
     contextSetUpdate?: {
         contextSets: Array<{
-            newOrUpdate: "new" | "update";
             name: string;
             context: string;
             visibleToAgents?: "none" | "all" | string[];
@@ -202,14 +204,7 @@ function formatFinalResult(state: OrchestrationState): OrchestrationFinalResult 
     };
 }
 
-export async function ORCHESTRATION_infoRequestToContextFormSet(currentMessage: string, contextSets: ContextContainerProps[], currentAgent: AgentComponentProps, messageHistory: ServerMessage[]) {
-    const formSchema = await AGENT_FORM_creator(currentMessage);
-      //result.newContext.push(UTILS_TEAMS_infoRequestContextFormSet(formSchema, [], props.currentAgent ?? {}, props.autoProps?.messageHistory ?? [], false));
-      const tempCTX = [...contextSets, UTILS_TEAMS_infoRequestContextFormSet(formSchema, [], currentAgent ?? {},messageHistory ?? [], false)]
 
-      return tempCTX
-
-}
 
 // --- Main Workflow Function --- //
 
@@ -417,124 +412,67 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                 logger.log(`Processing ${updates.length} context set updates from directives`);
                                 
                                 for (const update of updates) {
-                                    if (update.newOrUpdate === "new") {
-                                        // Add new context set
-                                        // Convert visibleToAgents to hiddenFromAgents
-                                        let hiddenFromAgents: string[] = [];
-                                        const visibleTo = (update as any).visibleToAgents || "all";
-                                        
+                                    // --- Refactored Logic Start ---
+                                    const index = state.contextSets.findIndex(cs => cs.setName === update.name);
+                                    const isExisting = index >= 0;
+                                    const isEmptyContext = update.context === "";
+
+                                    // Convert visibleToAgents to hiddenFromAgents (consistent calculation)
+                                    let hiddenFromAgents: string[] = isExisting ? state.contextSets[index].hiddenFromAgents || [] : [];
+                                    const visibleTo = (update as any).visibleToAgents; // Use potentially provided visibility
+
+                                    if (visibleTo) { // Only recalculate if visibility is specified in the update
                                         if (visibleTo === "none") {
-                                            // If visible to none, hide from all agents
                                             hiddenFromAgents = agents.map(agent => agent.name);
                                         } else if (visibleTo === "all") {
-                                            // If visible to all, hide from none
                                             hiddenFromAgents = [];
                                         } else {
-                                            // If specific agents are visible, hide from all others
-                                            if (Array.isArray(visibleTo)) {
-                                                // Handle array of visible agents
+                                            const visibleAgentNames = Array.isArray(visibleTo) ? visibleTo : [visibleTo];
                                                 hiddenFromAgents = agents
-                                                    .filter(agent => !visibleTo.includes(agent.name))
-                                                    .map(agent => agent.name);
-                                            } else {
-                                                // Handle single visible agent (backward compatibility)
-                                                hiddenFromAgents = agents
-                                                    .filter(agent => agent.name !== visibleTo)
+                                                .filter(agent => !visibleAgentNames.includes(agent.name))
                                                     .map(agent => agent.name);
                                             }
+                                    } else if (!isExisting) {
+                                        // Default visibility for brand new sets if not specified: visible to all
+                                        hiddenFromAgents = [];
+                                    }
+                                    // If visibility wasn't specified for an *existing* set, hiddenFromAgents retains its previous value
+
+                                    if (isEmptyContext) {
+                                        // Remove the context set if context is empty and it exists
+                                        if (isExisting) {
+                                            state.contextSets.splice(index, 1);
+                                            logger.log(`Removed context set "${update.name}" (empty context provided)`);
+                                        } else {
+                                            // Do nothing if trying to add/update a non-existent set with empty context
+                                            logger.log(`Skipped adding empty context set "${update.name}"`);
                                         }
-                                        
-                                        state.contextSets.push({
+                                    } else {
+                                        // Create or Update the context set if context is not empty
+                                        const newSetData: ContextContainerProps = {
                                             setName: update.name,
                                             text: update.context,
-                                            lines: [],
-                                            isDisabled: false,
-                                            hiddenFromAgents: hiddenFromAgents
-                                        });
-                                        logger.log(`Added new context set "${update.name}" visible to ${visibleTo}`);
-                                    } else if (update.newOrUpdate === "update") {
+                                            lines: [], // Assuming text-based context primarily
+                                            isDisabled: false, // Default value
+                                            hiddenFromAgents: hiddenFromAgents,
+                                            formSchema: (update as any).formSchema // Safely access formSchema
+                                            // Add other relevant fields from ContextContainerProps if needed
+                                        };
+
+                                        if (isExisting) {
                                         // Update existing context set
-                                        const index = state.contextSets.findIndex(cs => cs.setName === update.name);
-                                        if (index >= 0) {
-                                            if (update.context === "") {
-                                                // Remove the context set if empty string provided
-                                                state.contextSets.splice(index, 1);
-                                                logger.log(`Removed context set "${update.name}" (empty context provided)`);
-                                            } else {
-                                                // Convert visibleToAgents to hiddenFromAgents
-                                                let hiddenFromAgents: string[] = state.contextSets[index].hiddenFromAgents || [];
-                                                const visibleTo = (update as any).visibleToAgents;
-                                                
-                                                if (visibleTo) {
-                                                    if (visibleTo === "none") {
-                                                        // If visible to none, hide from all agents
-                                                        hiddenFromAgents = agents.map(agent => agent.name);
-                                                    } else if (visibleTo === "all") {
-                                                        // If visible to all, hide from none
-                                                        hiddenFromAgents = [];
-                                                    } else {
-                                                        // If specific agents are visible, hide from all others
-                                                        if (Array.isArray(visibleTo)) {
-                                                            // Handle array of visible agents
-                                                            hiddenFromAgents = agents
-                                                                .filter(agent => !visibleTo.includes(agent.name))
-                                                                .map(agent => agent.name);
-                                                        } else {
-                                                            // Handle single visible agent (backward compatibility)
-                                                            hiddenFromAgents = agents
-                                                                .filter(agent => agent.name !== visibleTo)
-                                                                .map(agent => agent.name);
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                // Update with new content
                                                 state.contextSets[index] = {
-                                                    ...state.contextSets[index],
-                                                    text: update.context,
-                                                    hiddenFromAgents: hiddenFromAgents
+                                                ...state.contextSets[index], // Preserve existing fields not overwritten
+                                                ...newSetData // Overwrite with new data
                                                 };
-                                                logger.log(`Updated context set "${update.name}" visible to ${visibleTo || "unchanged"}`);
-                                            }
+                                            logger.log(`Updated context set "${update.name}"`);
                                         } else {
-                                            // Context set doesn't exist
-                                            if (update.context === "") {
-                                                // Convert visibleToAgents to hiddenFromAgents
-                                                let hiddenFromAgents: string[] = [];
-                                                const visibleTo = (update as any).visibleToAgents || "all";
-                                                
-                                                if (visibleTo === "none") {
-                                                    // If visible to none, hide from all agents
-                                                    hiddenFromAgents = agents.map(agent => agent.name);
-                                                } else if (visibleTo !== "all") {
-                                                    // If specific agents are visible, hide from all others
-                                                    if (Array.isArray(visibleTo)) {
-                                                        // Handle array of visible agents
-                                                        hiddenFromAgents = agents
-                                                            .filter(agent => !visibleTo.includes(agent.name))
-                                                            .map(agent => agent.name);
-                                                    } else {
-                                                        // Handle single visible agent (backward compatibility)
-                                                        hiddenFromAgents = agents
-                                                            .filter(agent => agent.name !== visibleTo)
-                                                            .map(agent => agent.name);
-                                                    }
-                                                }
-                                                
-                                                // Create empty context set if trying to update non-existent set with empty string
-                                                state.contextSets.push({
-                                                    setName: update.name,
-                                                    text: "",
-                                                    lines: [],
-                                                    isDisabled: false,
-                                                    hiddenFromAgents: hiddenFromAgents
-                                                });
-                                                logger.log(`Created empty context set "${update.name}" visible to ${visibleTo}`);
-                                            } else {
-                                                logger.warn(`Couldn't find context set "${update.name}" to update`);
-                                            }
+                                            // Add new context set
+                                            state.contextSets.push(newSetData);
+                                            logger.log(`Added new context set "${update.name}"`);
                                         }
                                     }
+                                    // --- Refactored Logic End ---
                                 }
                             }
                             
