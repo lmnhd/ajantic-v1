@@ -9,15 +9,16 @@ import { UTILS_TEAMS_infoRequestContextFormSet } from "@/src/lib/teams/lib/teams
  * This isolates Prisma dependencies to server-only code
  */
 export async function createInfoRequestForm(
-  currentMessage: string, 
-  contextSets: ContextContainerProps[], 
-  currentAgent: AgentComponentProps, 
-  messageHistory: ServerMessage[]
-) {
-  const formSchema = await AGENT_FORM_creator(currentMessage);
-  const tempCTX = [...contextSets, UTILS_TEAMS_infoRequestContextFormSet(
-    formSchema, [], currentAgent ?? {}, messageHistory ?? [], false
-  )];
+  requestMessage: string,
+  contextSets: ContextContainerProps[],
+  agents: AgentComponentProps[],
+  teamName: string
+): Promise<ContextContainerProps[]> {
+  const formSchema = await AGENT_FORM_creator(requestMessage);
+  const newFormSet = UTILS_TEAMS_infoRequestContextFormSet(
+    formSchema, [], agents[0] ?? {}, [], false
+  );
   
-  return tempCTX;
+  // Return all context sets with the new form set added
+  return [...contextSets, newFormSet];
 } 

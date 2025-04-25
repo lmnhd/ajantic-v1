@@ -651,6 +651,10 @@ export type ServerMessage = {
   agentName?: string;
   contextSet?: ContextSet;
   conversationLevel?: number;
+  contextDeleted?: Array<{
+    deletedSet: string;
+    timestamp: number;
+  }>;
   expectedOutput?: {
     criteria: string;
     format?: string;

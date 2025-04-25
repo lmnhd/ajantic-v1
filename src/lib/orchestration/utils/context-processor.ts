@@ -22,7 +22,7 @@ export async function processInfoRequestContextForm(
     message,
     contextSets,
     agent,
-    history
+    ""
   );
   
   // Return both formats

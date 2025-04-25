@@ -1,0 +1,120 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+name: context-management-system
+description: Comprehensive overview of the context set management system in the application, explaining state flow, client-server interactions, and special handling mechanisms.
+---
+
+# Context Set Management System
+
+This rule provides a complete overview of how context sets are managed throughout the application, including state flow, APIs, and special handling cases.
+
+## Core Types and Data Structure
+
+- **`ContextContainerProps`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts)): The primary type representing a single context set with properties like:
+  - `setName`: Identifier for the set
+  - `text`: The main content of the set (string)
+  - `lines`: Optional array of line items (for structured content)
+  - `isDisabled`: UI state flag indicating if the set is temporarily disabled
+  - `hiddenFromAgents`: Array of agent names who shouldn't see this context
+  - `formSchema`: Optional schema for form-based context sets
+
+- **`ContextSet`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts)): Groups an array of `ContextContainerProps` under a `teamName` property.
+
+- **`ServerMessage`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts)): Can contain:
+  - `contextSet`: The complete updated context after an agent turn
+  - `contextDeleted`: Metadata about explicitly deleted contexts
+  - `agentDirectives.contextSetUpdate`: Instructions for context modifications
+
+## State Flow Architecture
+
+1. **Server-Side Context Management**:
+   - Orchestration workflows ([src/lib/orchestration/modes/manager-directed.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/modes/manager-directed.ts)) handle context updates based on agent directives
+   - Manager directives specify context creation, updates, and deletions
+   - Deletions are tracked via special `contextDeleted` metadata in messages
+   - Server sends the final context state back to the client
+
+2. **Client-Side State Management**:
+   - **Zustand Store** ([src/lib/store/analysis-store.ts](mdc:ajantic-v1/ajantic-v1/src/lib/store/analysis-store.ts)):
+     - Primary source of truth for application state
+     - `localState.contextSet` holds the active context sets
+     - `updateLocalState` method handles merging of incoming server changes
+     - Special handling for preserving disabled contexts that weren't explicitly deleted
+     - Context deletions tracked via a Set of deletion markers
+     
+   - **Component State** ([components/context-set-component.tsx](mdc:ajantic-v1/ajantic-v1/components/context-set-component.tsx)):
+     - UI-focused state for editing and display of context sets
+     - Provides user interactions for CRUD operations
+     - Communicates with store to update global state
+
+3. **Persistence Layer**:
+   - `handleSaveContextSet` persists sets to database
+   - `SERVER_getSavedContextSets` retrieves saved sets for loading
+   - `handleDeleteContextSet(s)` removes from database
+
+## Context Update Mechanisms
+
+### Manager-Directed Updates
+
+The primary mechanism for context updates is through the manager agent in `ORCHESTRATION_runManagerDirectedWorkflow`:
+
+1. Manager agent returns `agentDirectives.contextSetUpdate.contextSets[]`
+2. Each context set has `{ name, context, visibleToAgents }`
+3. Server processes each set:
+   - Sets with non-empty `context` are created or updated
+   - Sets with empty `context` ("") are deleted
+   - Deleted sets are marked with `contextDeleted` metadata
+4. Final context is returned to client with any deletion markers
+
+### Client-Side Merging Logic
+
+The `updateLocalState` and `handleOrchestratedChatSubmit` functions handle merging server and client states:
+
+1. Incoming context sets from server are preserved
+2. Client-side disabled sets are preserved only if:
+   - They aren't in the incoming update
+   - They weren't explicitly deleted (tracked via `contextDeleted` metadata)
+3. Special logging tracks this merging process for debugging
+
+### Information Request Forms
+
+Form-based context updates follow a special flow:
+
+1. Manager issues an info request with `isInfoRequest: true`
+2. `processInfoRequestContextForm` in [src/lib/orchestration/utils/context-processor.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/utils/context-processor.ts) creates a form schema
+3. User fills the form, and data is converted to a context set
+4. This creates a structured data context rather than freeform text
+
+## Key API Interactions
+
+### Context Creation
+- `addSetToContainer`: Adds empty context containers
+- `storeAnalysisSet`: Persists to database with name
+
+### Context Modification
+- `handleSetLabelName`: Renames context sets
+- `editText`: Updates context content
+- `toggleHideFromAgents`: Changes visibility per agent
+- `shiftSetUpOrDown`: Reorders context sets
+
+### Context Deletion
+- `deleteTextFromSet`: Clears content but keeps container
+- `deleteSetFromContainer`: Removes container from current state
+- `handleDeleteContextSet`: Removes from database
+- Server-side deletions via empty context in manager directives
+
+## Special Handling Cases
+
+1. **Disabled Sets**: Marked with `isDisabled: true` in the client UI, these are specially preserved across updates unless explicitly deleted.
+
+2. **Deletion Tracking**: Server marks deletions with `contextDeleted` metadata in messages.
+
+3. **Form Schema Sets**: Special context sets with structured data input via forms.
+
+4. **Agent Visibility**: Each context set tracks which agents cannot see it via `hiddenFromAgents`.
+
+This comprehensive system enables dynamic context management throughout agent-based workflows while preserving user customizations.
+

@@ -443,6 +443,20 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                         if (isExisting) {
                                             state.contextSets.splice(index, 1);
                                             logger.log(`Removed context set "${update.name}" (empty context provided)`);
+                                            
+                                            // Mark this deletion explicitly in the agent response for better client sync
+                                            const deletionInfo = {
+                                                deletedSet: update.name,
+                                                timestamp: Date.now()
+                                            };
+                                            
+                                            // Add this metadata to the response for client-side handling
+                                            if (agentResponseMessage) {
+                                                agentResponseMessage.contextDeleted = 
+                                                    agentResponseMessage.contextDeleted 
+                                                    ? [...agentResponseMessage.contextDeleted, deletionInfo] 
+                                                    : [deletionInfo];
+                                            }
                                         } else {
                                             // Do nothing if trying to add/update a non-existent set with empty context
                                             logger.log(`Skipped adding empty context set "${update.name}"`);
@@ -563,7 +577,7 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                 directive.message,
                                 state.contextSets,
                                 managerAgent,
-                                state.conversationHistory
+                                "" // Replace with empty string or appropriate message ID
                             );
                             
                             // Update the state with the modified context sets

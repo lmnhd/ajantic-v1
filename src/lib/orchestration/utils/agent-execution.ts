@@ -450,57 +450,38 @@ export async function ORCHESTRATION_executeManagerTurn(
     };
 
     // Process context modifications - check both info request and explicit updates
-    // Context processing logic moved to manager-directed.ts
-    // if ((structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") || 
-    //     (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate)) {
+    if ((structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") || 
+        (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate)) {
         
-    //     // Start with current context sets
-    //     let updatedContextSets = [...contextSets];
+        // Start with current context sets
+        let updatedContextSets = [...contextSets];
         
-    //     // Process form request first if needed
-    //     if (structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") {
-    //         const { processInfoRequestContextForm } = await import("./context-processor");
-    //         const formContext = await processInfoRequestContextForm(
-    //             structuredResponse.object.message,
-    //             updatedContextSets, // Use already updated context
-    //             agentConfig,
-    //             history,
-    //             orchestrationState.config.teamName
-    //         );
+        // Process form request first if needed
+        if (structuredResponse.object.isInfoRequest && structuredResponse.object.messageTo === "user") {
+            const { processInfoRequestContextForm } = await import("./context-processor");
+            const formContextResult = await processInfoRequestContextForm(
+                structuredResponse.object.message,
+                updatedContextSets, // Use already updated context
+                agentConfig,
+                history,
+                orchestrationState.config.teamName
+            );
             
-    //         // Update the context for the next step
-    //         updatedContextSets = formContext.updatedContextSets;
-            
-    //         // Append form prompt text
-    //         result.response += "\n\n**Please fill out the form below to provide the requested information.**";
-    //     }
-        
-    //     // Then process explicit context updates if needed
-    //     // Removed call to processContextSetUpdates
-    //     // if (structuredResponse.object.contextUpdates && structuredResponse.object.contextSetUpdate) {
-    //     //     // const { processContextSetUpdates } = await import("./context-processor"); // Removed import
-    //     //     const updatedContext = processContextSetUpdates(
-    //     //         structuredResponse.object.contextSetUpdate.contextSets,
-    //     //         updatedContextSets, // Use already updated context including any form additions
-    //     //         config.agents,
-    //     //         orchestrationState.config.teamName
-    //     //     );
-            
-    //     //     // Update with final context
-    //     //     updatedContextSets = updatedContext.updatedContextSets;
-    //     // }
-        
-    //     // Set result with the fully processed context
-    //     // This is now handled within manager-directed.ts
-    //     // result.allContextSets = updatedContextSets;
-    //     // result.contextSet = {
-    //     //     teamName: orchestrationState.config.teamName,
-    //     //     sets: updatedContextSets
-    //     // };
-    // }
+            // Update the context with the correct result
+            updatedContextSets = formContextResult.updatedContextSets;
 
-    // Update UI state after manager turn completes
-    await updateUIState(orchestrationState);
+            // Update the result contextSets
+            result.allContextSets = updatedContextSets;
+           
+            
+            // Append form prompt text
+            result.response += "\n\n**Please fill out the form below to provide the requested information.**";
+        }
+        
+        // The rest of the commented-out code can be removed as it's handled in manager-directed.ts
+    }
+
+    
     
     return result;
   } catch (error: any) {

@@ -45,23 +45,25 @@ Key principles:
 2. Do NOT add any fields that weren't mentioned or implied in the request
 3. Prioritize providing the user with options whenever feasible.
 4. Use appropriate field types based on the following priority:
-   - string: Use ONLY for unique personal information (like names, specific IDs) or when options are impossible.
-   - enum_or_custom: PREFERRED - Use when there are potential options, but the user might need to enter a custom value. Provide suggested options in 'enumValues'/'enumLabels'.
-   - enum: Use when there is a small, fixed set of known options. Provide these options in 'enumValues'/'enumLabels'.
+   - enum_or_custom: PREFERRED DEFAULT - Always use this when any examples or options are mentioned in the request, especially in parentheses like "(e.g., option1, option2)". Extract all examples as enumValues.
+   - enum: Use when there is a fixed set of options with no need for custom input.
+   - string: Use ONLY when options are impossible to determine.
    - date: for dates.
    - number: for numerical values.
-   - file: for file uploads.
    - boolean: for simple yes/no choices.
-5. Add clear descriptions to help users understand what information is needed
-6. Group related fields if multiple fields are needed for a single request using the 'group' property
-7. Always generate 'enumValues' and 'enumLabels' when using 'enum' or 'enum_or_custom'.
+5. ALWAYS SCAN FOR EXAMPLES in the message, particularly text in parentheses with "e.g." or "such as" or "like" - these are potential enum values.
+6. Add clear descriptions to help users understand what information is needed
+7. Group related fields if multiple fields are needed for a single request using the 'group' property
+8. Always generate 'enumValues' and 'enumLabels' when using 'enum' or 'enum_or_custom'.
 
 Example 1 (Request: "What is your name and email?"):
 Fields: [{ key: "name", valueType: "string" }, { key: "email", valueType: "string" }]
+
 Example 2 (Request: "What type of document is this? It could be an invoice, receipt, or maybe a contract."):
 Fields: [{ key: "documentType", valueType: "enum_or_custom", enumValues: ["invoice", "receipt", "contract"], enumLabels: ["Invoice", "Receipt", "Contract"] }]
-Example 3 (Request: "Select the primary color: Red, Green, or Blue?"):
-Fields: [{ key: "primaryColor", valueType: "enum", enumValues: ["red", "green", "blue"], enumLabels: ["Red", "Green", "Blue"] }]`,
+
+Example 3 (Request: "Do you have any specific product category in mind? (e.g., health & fitness, wealth, relationships)"):
+Fields: [{ key: "productCategory", valueType: "enum_or_custom", enumValues: ["health_fitness", "wealth", "relationships"], enumLabels: ["Health & Fitness", "Wealth", "Relationships"] }]`,
       },
       {
         role: "user",

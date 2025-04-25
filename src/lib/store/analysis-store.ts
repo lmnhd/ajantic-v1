@@ -391,8 +391,72 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
     // REMOVED: No longer need to check localStorage since orchestration settings 
     // are now properly saved directly in IndexedDB within the AISessionState
   },
-  updateLocalState: (state: Partial<AISessionState>) =>
-    updateLocalState(state, get, set),
+  updateLocalState: (newState) => {
+    set((state) => {
+      // Start with a shallow merge
+      let finalLocalState = { ...state.localState, ...newState };
+
+      // Special handling for contextSet updates to preserve client-side disabled sets
+      if (newState.contextSet && state.localState.contextSet) {
+        const incomingSets = newState.contextSet.sets ?? [];
+        const currentClientSets = state.localState.contextSet.sets ?? [];
+
+        // Create a map of incoming sets for efficient lookup, keyed by setName
+        const incomingSetsMap = new Map(incomingSets.map(set => [set.setName, set]));
+        
+        // Create a set of setNames from the incoming update to efficiently check existence
+        const incomingSetNames = new Set(incomingSets.map(set => set.setName));
+        
+        // Get the current set names to detect intentional deletions
+        const currentSetNames = new Set(currentClientSets.map(set => set.setName));
+        
+        // Find set names that were in the previous state but not in the new state
+        // These are likely intentionally deleted sets
+        const deletedSetNames = new Set(
+          [...currentSetNames].filter(name => !incomingSetNames.has(name))
+        );
+        
+        console.log("Context sets - incoming:", incomingSets.length, 
+                    "current:", currentClientSets.length, 
+                    "detected deletions:", deletedSetNames.size);
+
+        // Only preserve disabled sets that weren't intentionally deleted
+        const disabledSetsToPreserve = currentClientSets.filter(
+          set => set.isDisabled && 
+                !incomingSetsMap.has(set.setName) && 
+                !deletedSetNames.has(set.setName)
+        );
+        
+        if (disabledSetsToPreserve.length > 0) {
+          console.log("Preserving disabled sets:", disabledSetsToPreserve.map(s => s.setName));
+        }
+
+        // Combine the incoming sets with the disabled sets that need preserving
+        const finalMergedSets = [...incomingSets, ...disabledSetsToPreserve];
+
+        // Update the contextSet within the final state object
+        finalLocalState = {
+          ...finalLocalState,
+          contextSet: {
+            // Keep other properties like teamName from the incoming update
+            ...(newState.contextSet || {}),
+            sets: finalMergedSets // Use the merged set list
+          }
+        };
+      } else if (newState.contextSet) {
+         // If there was no previous contextSet, just use the incoming one directly
+         finalLocalState = {
+           ...finalLocalState,
+           contextSet: newState.contextSet
+         };
+      }
+
+      // Return the final state update object for Zustand
+      return { localState: finalLocalState };
+    });
+    // Consider if saveState needs to be called conditionally based on what changed
+    // get().saveState(); 
+  },
   updateMessages: (messages: ServerMessage[]) =>
     updateMessages(messages, get, set),
 

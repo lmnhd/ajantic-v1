@@ -187,15 +187,56 @@ export async function handleOrchestratedChatSubmit(
     
     logger.log("Orchestration completed with status:", { status: result.status });
     
-    // Update the UI with the result - runs on client
+    // Get the current client-side context sets BEFORE setting the final state
+    const currentClientContextSet = get().localState.contextSet;
+
+    // Check for context deletion metadata in the conversation history
+    const deletedContextSets = new Set<string>();
+    result.finalConversationHistory.forEach(message => {
+      if (message.contextDeleted && message.contextDeleted.length > 0) {
+        message.contextDeleted.forEach(deletion => {
+          deletedContextSets.add(deletion.deletedSet);
+        });
+      }
+    });
+    
+    if (deletedContextSets.size > 0) {
+      logger.log("Detected explicitly deleted context sets:", { deletedSets: [...deletedContextSets] });
+    }
+
+    // Perform the merge logic similar to updateLocalState
+    const incomingSets = result.finalContextSets ?? [];
+    const currentClientSets = currentClientContextSet?.sets ?? [];
+
+    const incomingSetsMap = new Map(incomingSets.map(set => [set.setName, set]));
+    
+    // Only preserve disabled sets that weren't explicitly deleted
+    const disabledSetsToPreserve = currentClientSets.filter(
+      set => set.isDisabled && 
+            !incomingSetsMap.has(set.setName) && 
+            !deletedContextSets.has(set.setName)
+    );
+    
+    if (disabledSetsToPreserve.length > 0) {
+      logger.log("Preserving disabled context sets:", { 
+        preservedSets: disabledSetsToPreserve.map(s => s.setName) 
+      });
+    }
+    
+    const finalMergedSets = [...incomingSets, ...disabledSetsToPreserve];
+
+    // Update the UI with the MERGED result
     set({
       agentActive: false,
       currentConversation: result.finalConversationHistory,
       contextSet: {
-        sets: result.finalContextSets,
-        teamName: stateData.teamName
+        sets: finalMergedSets, // Use the merged sets
+        teamName: stateData.teamName // Keep existing team name or use one from result if available
       }
     });
+
+    // Persist the updated state to prevent it from reverting
+    await get().saveState();
     
     // If there was an error, show a toast - runs on client
     if (result.status === "error" && result.error) {

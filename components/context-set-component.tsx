@@ -65,7 +65,7 @@ import { Trash2Icon } from "lucide-react";
 type ThemeColor = 'violet' | 'blue' | 'indigo' | 'purple' | 'slate' | 'gray' | 'zinc' | 'emerald' | 'green' | 'red' | 'yellow' | string;
 
 interface ContextSetComponentProps {
-  inputContextSet: ContextSet;
+  inputContextSet: ContextSet | null | undefined;
   allAgents: AgentComponentProps[];
   currentContextSetItem: number;
   setCurrentContextSetItem: (index: number) => void;
@@ -87,17 +87,31 @@ const ContextSetComponent = ({
   setContextSetStore,
   loadContextSet,
   handleDeleteTextFromSet,
-  handleSetsChanged,
   themeColor = 'indigo'
 }: ContextSetComponentProps) => {
   const [gridCols, setGridCols] = React.useState<number>(2);
-  const [localContext, setLocalContext] = React.useState<ContextSet>(
-    inputContextSet || { sets: [], teamName: "" } // Ensure initial state is valid
-  );
-  const prevLocalContextRef = useRef<ContextSet>(); // Ref to store previous context
-  const [selectedSetId, setSelectedSetId] = React.useState<string>("");
   const { toast } = useToast();
   const { appState } = useGlobalStore();
+  const {
+    localState,
+    updateLocalState,
+    saveState,
+    handleSaveContextSet,
+    handleLoadContextSet,
+    handleDeleteContextSet,
+    handleDeleteMultipleContextSets
+  } = useAnalysisStore(state => ({
+    localState: state.localState,
+    updateLocalState: state.updateLocalState,
+    saveState: state.saveState,
+    handleSaveContextSet: state.handleSaveContextSet,
+    handleLoadContextSet: state.handleLoadContextSet,
+    handleDeleteContextSet: state.handleDeleteContextSet,
+    handleDeleteMultipleContextSets: state.handleDeleteMultipleContextSets
+  }));
+
+  const [isFullScreen, setIsFullScreen] = React.useState(false);
+  const [selectedSetId, setSelectedSetId] = React.useState<string>("");
   const [savedAnalysisStatesLoaded, setSavedAnalysisStatesLoaded] =
     React.useState<boolean>(false);
   const [isAnyContainerFullscreen, setIsAnyContainerFullscreen] =
@@ -105,28 +119,20 @@ const ContextSetComponent = ({
   const [selectedSets, setSelectedSets] = React.useState<number[]>([]);
   const [isManageDialogOpen, setIsManageDialogOpen] = React.useState(false);
 
-  // Use analysis store for syncing
-  const { 
-    updateLocalState, 
-    saveState, 
-    localState,
-    handleSaveContextSet, 
-    handleLoadContextSet,
-    handleDeleteContextSet,
-    handleDeleteMultipleContextSets
-  } = useAnalysisStore();
-
-  // Load saved context sets on mount
   React.useEffect(() => {
     const loadSavedSets = async () => {
-      if (!appState.currentUser?.id) return;
-      
+      if (!appState?.currentUser?.id) {
+        console.warn("ContextSetComponent: currentUser not available yet for loading saved sets.");
+        return;
+      }
       try {
-        const savedSets = await SERVER_getSavedContextSets(appState.currentUser.id);
-        setContextSetStore(savedSets);
+        const savedSets = await SERVER_getSavedContextSets(
+          appState.currentUser.id
+        );
+        setContextSetStore(savedSets || []);
         setSavedAnalysisStatesLoaded(true);
       } catch (error) {
-        console.error("Error loading saved sets:", error);
+        console.error("Error loading saved context sets:", error);
         toast({
           title: "Error",
           description: "Failed to load saved context sets",
@@ -135,57 +141,36 @@ const ContextSetComponent = ({
       }
     };
     loadSavedSets();
-  }, [appState.currentUser?.id, setContextSetStore, toast]);
+  }, [appState?.currentUser?.id, setContextSetStore, toast]);
 
-  // Sync with analysis store when local sets change
-  const syncLocalSetsWithAnalysisStore = useCallback(() => {
-    console.log("Syncing local sets with analysis store:", localContext);
-
-    // Update contextSets in the store
-    updateLocalState({ contextSet: localContext });
-    handleSetsChanged?.(localContext);
-  }, [localContext]);
-
-  // Initialize from input
-  React.useEffect(() => {
-    if (!inputContextSet) return;
-    setLocalContext(inputContextSet);
-  }, [inputContextSet]);
-
-  // Fix: Add a condition to prevent continuous updates
-  React.useEffect(() => {
-    syncLocalSetsWithAnalysisStore();
-  }, [syncLocalSetsWithAnalysisStore]);
-
-  // Handle storing analysis set
   const storeAnalysisSet = async () => {
-    if (localContext.sets.length === 0 || !appState.currentUser?.id) return;
+    if (!inputContextSet || inputContextSet.sets.length === 0 || !appState.currentUser?.id) return;
 
-    // Prompt user to name the analysis set
     const name = prompt("Name this analysis set", localState.currentAgents.name + " context" );
     if (!name) return;
 
     try {
-      // Format the sets data to ensure all required fields are properly set
-      const formattedSets = localContext.sets.map(set => ({
+      const formattedSets = inputContextSet.sets.map(set => ({
         setName: set.setName || `Set ${Math.random().toString(36).substr(2, 9)}`,
         lines: Array.isArray(set.lines) ? set.lines : [],
         text: set.text || "",
-        formSchema: set.formSchema || null,
+        formSchema: set.formSchema || undefined,
         isDisabled: set.isDisabled || false,
         hiddenFromAgents: Array.isArray(set.hiddenFromAgents) ? set.hiddenFromAgents : []
       }));
 
-      // Create a properly formatted context set
-      const formattedContextSet = {
-        ...localContext,
-        sets: formattedSets,
+      const formattedContextSet: ContextSet = {
+        ...inputContextSet,
+        sets: formattedSets ? formattedSets : [] as ContextContainerProps[],
         teamName: name
-      } as ContextSet;
+      };
 
       await handleSaveContextSet(formattedContextSet, name);
       
-      // Refresh the context set store after saving
+      if (!appState?.currentUser?.id) {
+        console.error("ContextSetComponent: Cannot refresh saved sets, currentUser not available.");
+        return;
+      }
       const savedSets = await SERVER_getSavedContextSets(appState.currentUser.id);
       setContextSetStore(savedSets);
 
@@ -195,7 +180,6 @@ const ContextSetComponent = ({
         type: "foreground",
       });
 
-      // Also save to IndexedDB via the store
       await saveState();
     } catch (error) {
       console.error("Error saving analysis set:", error);
@@ -208,33 +192,40 @@ const ContextSetComponent = ({
   };
 
   const shiftSetUpOrDown = (index: number, direction: "up" | "down") => {
+    if (!inputContextSet) return;
+    const currentSets = inputContextSet.sets;
     if (direction === "up" && index === 0) return;
-    if (direction === "down" && index === localContext.sets.length - 1) return;
-    const _sets = [...localContext.sets];
-    if (direction === "up") {
-      _sets.splice(index - 1, 0, _sets.splice(index, 1)[0]);
-    } else {
-      _sets.splice(index + 1, 0, _sets.splice(index, 1)[0]);
-    }
-    setLocalContext({ ...localContext, sets: _sets });
+    if (direction === "down" && index === currentSets.length - 1) return;
+
+    const nextSets = [...currentSets];
+    const [movedSet] = nextSets.splice(index, 1);
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    nextSets.splice(targetIndex, 0, movedSet);
+
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const deletTextFromSetCalled = (index: number) => {
+    if (!inputContextSet) return;
     console.log("deletTextFromSetCalled");
-    const _newSets = [...localContext.sets];
-    _newSets[index].text = "";
-    setLocalContext({ ...localContext, sets: _newSets });
+    const nextSets = inputContextSet.sets.map((set, i) =>
+      i === index ? { ...set, text: "" } : set
+    );
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
     handleDeleteTextFromSet?.(index.toString());
   };
 
   const convertLinesToText = (index: number) => {
+    if (!inputContextSet) return;
     console.log("converting lines to text", index);
-    const _sets = [...localContext.sets];
-    _sets[index].text = _sets[index].lines
-      ?.map((line: LineLyricType) => line.content)
-      .join("\n");
-    _sets[index].lines = [];
-    setLocalContext({ ...localContext, sets: _sets });
+    const nextSets = inputContextSet.sets.map((set, i) => {
+      if (i === index && Array.isArray(set.lines)) {
+        const newText = set.lines.map((line: LineLyricType) => line.content).join("\n");
+        return { ...set, text: newText, lines: [] };
+      }
+      return set;
+    });
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const toggleHideFromAgents = (
@@ -243,89 +234,89 @@ const ContextSetComponent = ({
     allAgentNames: string[],
     soloInstead?: boolean
   ) => {
+    if (!inputContextSet) return;
+    let nextSets;
     if (soloInstead) {
       console.log("SOLO_INSTEAD", agentName, selectedIndex);
-      const _sets = [...localContext.sets];
-      for (let index = 0; index < _sets.length; index++) {
+      nextSets = inputContextSet.sets.map((set, index) => {
         if (index === selectedIndex) {
-          _sets[index].hiddenFromAgents = allAgentNames.filter(
-            (a) => a !== agentName
-          );
+          return { ...set, hiddenFromAgents: allAgentNames.filter(a => a !== agentName) };
         }
-      }
-      setLocalContext({ ...localContext, sets: _sets });
+        return set;
+      });
     } else {
-      const _sets = [...localContext.sets];
-      const currentSet = _sets[selectedIndex];
-      currentSet.hiddenFromAgents = currentSet.hiddenFromAgents?.includes(
-        agentName
-      )
-        ? currentSet.hiddenFromAgents.filter((a) => a !== agentName)
-        : [...(currentSet.hiddenFromAgents ?? []), agentName];
-      setLocalContext({ ...localContext, sets: _sets });
+      nextSets = inputContextSet.sets.map((set, index) => {
+        if (index === selectedIndex) {
+          const currentHidden = set.hiddenFromAgents ?? [];
+          const isHidden = currentHidden.includes(agentName);
+          const nextHidden = isHidden
+            ? currentHidden.filter((a) => a !== agentName)
+            : [...currentHidden, agentName];
+          return { ...set, hiddenFromAgents: nextHidden };
+        }
+        return set;
+      });
     }
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const editText = (text: string, index: number) => {
+    if (!inputContextSet) return;
     console.log("editing text", text);
-    const _sets = [...localContext.sets];
-    const _set = _sets[index];
-    _set.text = text;
-    _sets[index] = _set;
-    setLocalContext({ ...localContext, sets: _sets });
+    const nextSets = inputContextSet.sets.map((set, i) =>
+      i === index ? { ...set, text: text } : set
+    );
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
-  const deleteLineOrTextFromLyricSet = (index: number) => {
-    console.log("deleting index", index);
-    if (index === -1) {
-      const _sets = [...localContext.sets];
-      const _set = _sets[currentContextSetItem];
-      _set.text = "";
-      _set.setName = `Set ${currentContextSetItem + 1}`;
-      _sets[currentContextSetItem] = _set;
-      setLocalContext({ ...localContext, sets: _sets });
-      return;
-    }
-    console.log("deleting index", index, localContext.sets.length, currentContextSetItem);
-
-    if (localContext.sets.length === 0) {
-      return;
-    }
-
-    const _sets = [...localContext.sets];
-    const _set = _sets[index];
-    _set.lines?.splice(index, 1);
-    _sets[currentContextSetItem] = _set;
-    setLocalContext({ ...localContext, sets: _sets });
+  const deleteLineOrTextFromLyricSet = (lineIndex: number) => {
+    if (!inputContextSet) return;
+    console.log("Clearing text/lines for current item:", currentContextSetItem);
+    const nextSets = inputContextSet.sets.map((set, i) => {
+       if (i === currentContextSetItem) {
+         return { ...set, text: "", lines: [], setName: set.setName || `Set ${i + 1}` };
+       }
+       return set;
+    });
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const deleteSingleLineFromSet = (setIndex: number, lineIndex: number) => {
+    if (!inputContextSet) return;
     console.log("deleting single line from set", setIndex, lineIndex);
-    const _sets = [...localContext.sets];
-    _sets[setIndex].lines?.splice(lineIndex, 1);
-    setLocalContext({ ...localContext, sets: _sets });
+    const nextSets = inputContextSet.sets.map((set, i) => {
+      if (i === setIndex && Array.isArray(set.lines)) {
+         const nextLines = [...set.lines];
+         nextLines.splice(lineIndex, 1);
+         return { ...set, lines: nextLines };
+      }
+      return set;
+    });
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const addSetToContainer = () => {
-    if (!localContext) return;
-    const _sets = [...localContext.sets];
-    _sets.push({
+    if (!inputContextSet) return;
+    const nextSets = [
+      ...(inputContextSet.sets ?? []),
+      {
       lines: [],
       text: "",
-      setName: `Set ${_sets.length + 1}`,
+        setName: `Set ${(inputContextSet.sets?.length ?? 0) + 1}`,
       isDisabled: false,
       hiddenFromAgents: [],
-    });
-    setLocalContext({ ...localContext, sets: _sets });
+      }
+    ];
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const deleteSetFromContainer = (index: number) => {
-    const _sets = [...localContext.sets];
-    _sets.splice(index, 1);
-    setLocalContext({ ...localContext, sets: _sets });
+    if (!inputContextSet) return;
+    const nextSets = [...inputContextSet.sets];
+    nextSets.splice(index, 1);
+    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
-  // Update Select component to handle loading saved states
   const handleLoadSavedState = async (id: string) => {
     try {
       setSelectedSetId(id);
@@ -345,15 +336,14 @@ const ContextSetComponent = ({
     }
   };
 
-  // Also update the clear button to properly clear both arrays
   const clearSets = () => {
+    if (!inputContextSet) return;
     const reset = confirm("Are you sure you want to reset the line sets?");
     if (reset) {
-      setLocalContext({ ...localContext, sets: [] });
+      updateLocalState({ contextSet: { ...inputContextSet, sets: [] } });
     }
   };
 
-  // Add handler for fullscreen changes
   const handleFullscreenChange = (isFullscreen: boolean) => {
     console.log("handleFullscreenChange", isFullscreen);
     setIsAnyContainerFullscreen(isFullscreen);
@@ -374,19 +364,16 @@ const ContextSetComponent = ({
     }
   }, [gridCols]);
 
-  // Define setLabelName handler with useCallback
   const handleSetLabelName = useCallback((newName: string, index: number) => {
-    setLocalContext(prevContext => {
-      const _sets = [...prevContext.sets];
-      // Only update if name actually changed
-      if (_sets[index] && _sets[index].setName !== newName) {
-        _sets[index] = { ..._sets[index], setName: newName };
-        // updateLocalState is handled by the syncLocalSetsWithAnalysisStore effect
-        return { ...prevContext, sets: _sets };
-      }
-      return prevContext; // No change needed
-    });
-  }, [setLocalContext]); // Add setLocalContext as dependency
+    if (!inputContextSet) return;
+    const currentSet = inputContextSet.sets[index];
+    if (currentSet && currentSet.setName !== newName) {
+      const nextSets = inputContextSet.sets.map((set, i) =>
+         i === index ? { ...set, setName: newName } : set
+      );
+      updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    }
+  }, [inputContextSet, updateLocalState]);
 
   const handleDeleteSelected = async () => {
     if (selectedSets.length === 0) return;
@@ -396,7 +383,10 @@ const ContextSetComponent = ({
 
     try {
       await handleDeleteMultipleContextSets(selectedSets);
-      // Refresh the context set store
+      if (!appState?.currentUser?.id) {
+         console.error("ContextSetComponent: Cannot refresh saved sets, currentUser not available.");
+         return;
+      }
       const savedSets = await SERVER_getSavedContextSets(appState.currentUser.id);
       setContextSetStore(savedSets);
       setSelectedSets([]);
@@ -421,7 +411,10 @@ const ContextSetComponent = ({
 
     try {
       await handleDeleteContextSet(id);
-      // Refresh the context set store
+      if (!appState?.currentUser?.id) {
+         console.error("ContextSetComponent: Cannot refresh saved sets, currentUser not available.");
+         return;
+      }
       const savedSets = await SERVER_getSavedContextSets(appState.currentUser.id);
       setContextSetStore(savedSets);
       toast({
@@ -511,7 +504,6 @@ const ContextSetComponent = ({
     return (
       <div className="sticky top-0 z-50">
         <div className={`flex items-center justify-between h-12 px-4 bg-gradient-to-r from-slate-900/90 via-${themeColor}-900/80 to-slate-900/90 border-b border-${themeColor}-500/20`}>
-          {/* Left section */}
           <div className="flex items-center space-x-4">
             <div className="flex items-center gap-2">
               <span className={`text-sm font-medium text-${themeColor}-400`}>
@@ -553,7 +545,6 @@ const ContextSetComponent = ({
             </div>
           </div>
 
-          {/* Right section */}
           <div className="flex items-center space-x-4">
             <div className="flex items-center gap-2">
               <Button
@@ -603,28 +594,27 @@ const ContextSetComponent = ({
       <div
         className={cn(
           `bg-${themeColor}-800/10 mix-blend-screen z-[10] rounded-sm w-full`,
-           isAnyContainerFullscreen && "fixed inset-0 z-[99] h-screen bg-black/95 mt-14?" // Lower z-index than container, add margin-top
+           isAnyContainerFullscreen && "fixed inset-0 z-[99] h-screen bg-black/95 mt-14?"
         )}
       >
         <div
           className={cn(
             "flex justify-between min-w-full items-center mb-10",
-            isAnyContainerFullscreen && "h-screen overflow-hidden bg-black/95" // Prevent background scroll
+            isAnyContainerFullscreen && "h-screen overflow-hidden bg-black/95"
           )}
         >
           <div
             className={cn(
               `grid grid-flow-row-dense w-full gap-2 items-start justify-evenly h-full overflow-y-auto pb-96`,
               getColLength(),
-              isAnyContainerFullscreen && "grid-cols-1" // Force single column in fullscreen
+              isAnyContainerFullscreen && "grid-cols-1"
             )}
           >
-            {localContext.sets &&
-              localContext.sets.map((set, i) => (
-                <div key={i}>
+            {inputContextSet?.sets &&
+              inputContextSet.sets.map((set, i) => (
+                <div key={set.setName + i}>
                   <ContextContainer
                     {...set}
-                    key={i}
                     lines={set.lines as LineLyricType[] ?? []}
                     text={set.text ?? ""}
                     name={set.setName}
@@ -639,12 +629,14 @@ const ContextSetComponent = ({
                     setCurrentContextItem={setCurrentContextSetItem}
                     deleteSingleLineFromSet={deleteSingleLineFromSet}
                     setIsDisabled={(v: any) => {
-                      const _sets = [...localContext.sets];
-                      // Only update if value changed
-                      if (_sets[i].isDisabled !== v) {
-                        _sets[i].isDisabled = v;
-                        updateLocalState({ contextSet: {sets: _sets, teamName: localContext.teamName} });
-                        setCurrentContextSetItem(i); // Use index i instead of value v
+                      if (!inputContextSet) return;
+                      const currentSet = inputContextSet.sets[i];
+                      if (currentSet?.isDisabled !== v) {
+                         const nextSets = inputContextSet.sets.map((s, idx) =>
+                            idx === i ? { ...s, isDisabled: v } : s
+                         );
+                         updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+                         setCurrentContextSetItem(i);
                       }
                     }}
                     formSchema={set.formSchema}
