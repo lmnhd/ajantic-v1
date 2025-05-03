@@ -1,16 +1,16 @@
-// Removed \"use server\"
+// Removed "use server"
 
 // Removed: tool from 'ai'
 import { z } from "zod";
 import { logger } from "../../logger";
 import { tool } from "ai";
-import { createExecuteFunctionForLoading, getAgentToolsRegistry } from "./auto-gen-tool_core";
+import { getAgentToolsRegistry } from "./auto-gen-tool_core";
 // Removed: logger, getAgentToolsRegistry
 
 // Interface for tool parameter definition (Client-safe)
 export interface ToolParameter {
   name: string;
-  type: string;
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
   required?: boolean;
   default?: any;
@@ -21,12 +21,12 @@ export interface CustomToolDefinition {
   name: string;
   description: string;
   parameters: ToolParameter[];
-  functionBody: string; // Note: Body is here but execution is server-side
+  // functionBody: string; // DEPRECATED: Use implementation instead
   category?: string;
   
   // New fields for registry integration
   id?: string;
-  implementation?: string;
+  implementation?: string; // The primary field for the tool's code
   implementationType?: string;
   metadata?: {
     agentId?: string;
@@ -83,41 +83,6 @@ export const UTILS_buildParameterSchema = (parameters: ToolParameter[]): z.ZodOb
   });
   
   return z.object(schemaFields);
-};
-
-export const UTILS_generateDynamicTool = async (
-  toolDefinition: CustomToolDefinition
-): Promise<any> => {
-  const { name, description, parameters, functionBody } = toolDefinition;
-  
-  logger.tool("Tool Generator - Generating Tool", { 
-    name,
-    parametersCount: parameters.length,
-    functionBodyLength: functionBody.length
-  });
-
-  try {
-    // Create a zod schema from the parameters
-    const parameterSchema = UTILS_buildParameterSchema(parameters);
-    
-    // Create the tool function
-    const generatedTool = tool({
-      description,
-      parameters: parameterSchema,
-      execute: await createExecuteFunctionForLoading(functionBody, parameters)
-    });
-    
-    logger.tool("Tool Generator - Generated Successfully", { name });
-    
-    return generatedTool;
-  } catch (error) {
-    logger.error("Tool Generator - Generation Failed", {
-      name,
-      error: error instanceof Error ? error.message : "Unknown error"
-    });
-    
-    throw new Error(`Failed to generate tool: ${error instanceof Error ? error.message : "Unknown error"}`);
-  }
 };
 
 /**

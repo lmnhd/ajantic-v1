@@ -10,7 +10,7 @@ import { TOOLFUNCTION_split_text } from "@/src/app/api/tools/splitters";
 import { AGENT_TOOLS_EMULATOR, AISessionState } from "@/src/lib/types";
 import { tool } from "ai";
 import { z } from "zod";
-import { TextChatLogProps } from "../text-chat-log";
+import { TextChatLogProps } from "../../text-chat-log";
 import { logger } from '@/src/lib/logger';
 import { SERVER_kbQuery } from "@/src/lib/server2";
 

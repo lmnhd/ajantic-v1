@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 
 import { useGlobalStore } from "@/src/lib/store/GloabalStoreState";
 import { ExitIcon, PlusCircledIcon } from "@radix-ui/react-icons";
@@ -27,7 +27,9 @@ import {
   ModelProvider,
   ModelProviderEnum,
   OrchestrationType,
-  ServerMessage, // Ensure this type is defined in ajantic/lib/types
+  ServerMessage,
+  AgentTypeEnum,
+  AgentComponentProps,
 } from "@/src/lib/types";
 import { Button } from "@/components/ui/button";
 import { useChat } from "ai/react";
@@ -161,6 +163,12 @@ const TopLevelSubMessages = ({ message }: { message: ServerMessage }) => {
   );
 };
 
+// Locally extend ServerMessage interface for the client-side field
+// This avoids modifying the global type definition
+interface ClientAugmentedServerMessage extends ServerMessage {
+  _recipientAgentName?: string; // Optional client-side field
+}
+
 interface AJMessageComponentProps {
   messages: ServerMessage[];
   setMessages: (messages: ServerMessage[]) => void;
@@ -174,6 +182,7 @@ interface AJMessageComponentProps {
   isFullscreen?: boolean;
   orchestrationMode?: OrchestrationType2;
   className?: string;
+  allAgents?: AgentComponentProps[]; // Keep this prop
 }
 
 export default function AJMessageComponent({
@@ -188,15 +197,19 @@ export default function AJMessageComponent({
   agentIndex,
   className,
   isFullscreen = false,
-  // freeFlowMessages = false, // Replaced by orchestrationMode
-  // teamChat = false, // No longer used directly
-  orchestrationMode = OrchestrationType2.DIRECT_AGENT_INTERACTION, // From store
+  orchestrationMode = OrchestrationType2.DIRECT_AGENT_INTERACTION,
+  allAgents = [],
 }: AJMessageComponentProps) {
   const [messageHistoryIndex, setMessageHistoryIndex] = useState<number>(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedDayName, setSelectedDayName] = useState<string | undefined>(undefined);
   const { toast } = useToast();
-  const { appState } = useGlobalStore(); // Removed setAppState if not used
+  const { appState } = useGlobalStore();
+
+  // Find the manager agent's name (Keep this)
+  const managerName = useMemo(() => {
+    return allAgents.find(agent => agent.type === AgentTypeEnum.MANAGER)?.name;
+  }, [allAgents]);
 
   useEffect(() => {
     if (messageHistoryIndex >= 0 && conversationHistory && messageHistoryIndex < conversationHistory.length) {
@@ -380,57 +393,85 @@ export default function AJMessageComponent({
           { "opacity-50": isLoading }
         )}
       >
-        {messages && messages.map((m, index) => (
-           <Element
-            name={`message-${index}`}
-            key={index}
-             className={cn(
-              "flex flex-col w-full gap-1 rounded p-2 text-sm",
-              m.role === "user" ? "bg-gray-800/30" : "bg-gray-700/30",
-              "relative"
-            )}
-          >
-            <MessageActionBar
-              m={m as ServerMessage}
-              messages={messages as ServerMessage[]}
-              setMessages={setMessages}
-              agentIndex={agentIndex ?? 0}
-              userId={userId}
-              promptTextToSet={promptTextToSet ?? (() => {})}
-            />
+        {messages && messages.map((m, index) => {
+           // Cast the message to potentially include the client-side field
+           const currentMessage = m as ClientAugmentedServerMessage;
 
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "text-xs font-medium",
-                  m.role === "user" ? "text-gray-300" : "text-gray-400"
-                )}
-              >
-                {m.role === "user"
-                  ? `${appState.currentUser?.firstName || 'User'}:`
-                  : (m as ServerMessage).agentName
-                  ? `${(m as ServerMessage).agentName}:`
-                  : "AI:"}
-              </span>
-               {m.role !== 'user' && <BotIcon className="w-3 h-3 text-indigo-400" />}
-            </div>
+           // Determine recipient name ONLY if it's a manager message in manager mode
+           // AND the client-side field _recipientAgentName exists.
+           let recipientName: string | undefined = undefined;
+           if (
+             orchestrationMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW &&
+             managerName && // Ensure manager is identified
+             currentMessage.agentName === managerName &&
+             currentMessage._recipientAgentName // Check if the client logic added this field
+           ) {
+             recipientName = currentMessage._recipientAgentName;
+           }
 
-            <div
-              className={cn(
-                "whitespace-pre-wrap overflow-x-hidden max-w-full break-words text-sm",
-                 m.role === 'user' ? 'text-gray-300' : 'text-gray-400'
+           return (
+             <Element
+              name={`message-${index}`}
+              key={index}
+               className={cn(
+                "flex flex-col w-full gap-1 rounded p-2 text-sm",
+                currentMessage.role === "user" ? "bg-gray-800/30" : "bg-gray-700/30",
+                "relative"
               )}
             >
-               {(m as ServerMessage).content}
-            </div>
+              <MessageActionBar
+                m={currentMessage} // Pass potentially augmented message
+                messages={messages as ServerMessage[]} // Keep original type here for prop compatibility if needed
+                setMessages={setMessages}
+                agentIndex={agentIndex ?? 0}
+                userId={userId}
+                promptTextToSet={promptTextToSet ?? (() => {})}
+              />
 
-            {(m as ServerMessage).subMessages && (m as ServerMessage).subMessages!.length > 0 && (
-              <div className="mt-2 border-t border-gray-700 pt-1">
-                <TopLevelSubMessages message={m as ServerMessage} />
+              <div className="flex items-center gap-2 flex-wrap"> {/* Keep flex-wrap */}
+                {/* Sender Name */}
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    currentMessage.role === "user" ? "text-gray-300" : "text-gray-400"
+                  )}
+                >
+                  {currentMessage.role === "user"
+                    ? `${appState.currentUser?.firstName || 'User'}:`
+                    : currentMessage.agentName
+                    ? `${currentMessage.agentName}:`
+                    : "AI:"}
+                </span>
+                {/* Bot Icon */}
+                 {currentMessage.role !== 'user' && <BotIcon className="w-3 h-3 text-indigo-400 flex-shrink-0" />} {/* Keep flex-shrink-0 */}
+
+                {/* Display target agent name if recipient was found */}
+                {recipientName && (
+                   <span className="text-xs text-pink-400 ml-1 flex-shrink-0"> {/* Keep flex-shrink-0 */}
+                     {'-> '} {recipientName}
+                   </span>
+                 )}
               </div>
-            )}
-          </Element>
-        ))}
+
+              {/* Message Content */}
+              <div
+                className={cn(
+                  "whitespace-pre-wrap overflow-x-hidden max-w-full break-words text-sm",
+                   currentMessage.role === 'user' ? 'text-gray-300' : 'text-gray-400'
+                )}
+              >
+                 {currentMessage.content}
+              </div>
+
+              {/* Original SubMessages display (keep for other modes/future) */}
+              {currentMessage.subMessages && currentMessage.subMessages.length > 0 && (
+                <div className="mt-2 border-t border-gray-700 pt-1">
+                  <TopLevelSubMessages message={currentMessage} />
+                </div>
+              )}
+            </Element>
+           );
+        })}
         {isLoading && <div className="text-center text-gray-400 py-4">Loading history...</div>}
       </Element>
     </div>

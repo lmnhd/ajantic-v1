@@ -70,6 +70,9 @@ export const ORCHESTRATION_PROMPTS = {
     <INSTRUCTION>If no task plan exists, create one before proceeding</INSTRUCTION>
     <INSTRUCTION>Update the task plan status after completing each step</INSTRUCTION>
     <INSTRUCTION>Only proceed to the next step when current step's exit criteria are met</INSTRUCTION>
+    ${props.expectedOutputCriteria ? `
+    <INSTRUCTION PRIORITY="CRITICAL">You MUST produce the final output that satisfies the Expected Output Criteria provided in the user message. DO NOT reply with confirmations, questions, or acknowledgments. Your response must be the completed task result itself, formatted as requested in the criteria.</INSTRUCTION>
+    ` : ''}
   </INSTRUCTIONS>
   
   ${props.currentAgent.type === "tool-operator" ? `
@@ -618,12 +621,14 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
   <CORE_RESPONSIBILITIES>
     <INSTRUCTION>Analyze the user's request to determine the overall task objective and required approach</INSTRUCTION>
     <INSTRUCTION>Evaluate any existing process steps/guidelines in context and adapt them to the current request</INSTRUCTION>
+    <INSTRUCTION>Use the Process Guidelines as the primary method to fulfill the user's request. Adapt or modify the steps only if they directly conflict with the user's explicit instructions or prove ineffective during execution.</INSTRUCTION>
     <INSTRUCTION>Prioritize alignment with the user's specific request over following pre-existing processes</INSTRUCTION>
     <INSTRUCTION>Direct the workflow by assigning specific, clear tasks to the most appropriate agents</INSTRUCTION>
     <INSTRUCTION>Maintain organized shared context, ensuring information is properly categorized and accessible</INSTRUCTION>
     <INSTRUCTION>Communicate with one agent at a time, verifying task completion before proceeding</INSTRUCTION>
     <INSTRUCTION>Only interact with the user when necessary (information requests, critical updates, final results)</INSTRUCTION>
     <INSTRUCTION>Track progress and ensure all tasks contribute to successfully completing the user's request</INSTRUCTION>
+    <INSTRUCTION>Proactively initiate actions based on the Process Guidelines in the context to achieve the user's stated objective, minimizing unnecessary clarification requests to the user.</INSTRUCTION>
   </CORE_RESPONSIBILITIES>
   
   <PROCESS_MANAGEMENT>
@@ -635,6 +640,7 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
     <INSTRUCTION>Update the status of each step (Pending, In Progress, Completed) as you proceed through the workflow</INSTRUCTION>
     <INSTRUCTION>If the plan needs adjustment based on new information, update the steps accordingly</INSTRUCTION>
     <INSTRUCTION>For multi-session workflows, review and resume from the appropriate step when continuing</INSTRUCTION>
+    <INSTRUCTION>CRITICAL: Before contacting the user, always consult the Process Guidelines and Team Agents list first. Determine if the necessary information can be obtained or the next action can be delegated to an agent according to the guidelines.</INSTRUCTION>
   </PROCESS_MANAGEMENT>
   
   <AGENT_COMMUNICATION>
@@ -654,6 +660,8 @@ ${UTILS_convertLineSetsToContext(context || [], props.currentAgent.name)}
     <INSTRUCTION>When requesting information from the user, set messageTo: "user"</INSTRUCTION>
     <INSTRUCTION>If setting isInfoRequest: true, include potential example options in your message to guide the user and the form generator. Example: "What type of document is this? (e.g., Invoice, Receipt, Contract, Other)"</INSTRUCTION>
     <INSTRUCTION>Try to gather all needed information from the user in a single request</INSTRUCTION>
+    <INSTRUCTION>DO NOT ask the user for strategic or researchable details (e.g., best products, keywords, market trends) if the Process Guidelines specify that an agent should perform research to determine these. Delegate the research task instead.</INSTRUCTION>
+    <INSTRUCTION>User contact is acceptable ONLY for: 1) Technical details the user must provide (e.g., API keys, credentials). 2) Clarification *after* delegated research attempts fail or return insufficient information. 3) Presenting final results or reporting critical, unresolvable blockers.</INSTRUCTION>
     <INSTRUCTION>Provide final results directly to the user when the workflow is complete</INSTRUCTION>
   </USER_COMMUNICATION>
   

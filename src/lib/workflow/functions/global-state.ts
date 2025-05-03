@@ -36,9 +36,9 @@ export async function saveGlobalState(get: Function) {
   const frozenState: AppFrozenState = {
     localState: state.localState,
     currentConversation: state.currentConversation,
-    contextSet: state.contextSet,
+    //contextSet: state.contextSet,
     analysisSet: {
-      contextSet: state.contextSet,
+      //contextSet: state.contextSet,
       analysisName: state.localState.currentAgents?.name || "",
       userId: state.localState.userId,
     },
@@ -205,9 +205,9 @@ export async function loadFrozenGlobalState(
       const frozenState: AppFrozenState = {
         localState: _sessionState,
         currentConversation: _serverMessages,
-        contextSet: _contextSet,
+        //contextSet: _contextSet,
         analysisSet: {
-          contextSet: _contextSet,
+          //contextSet: _contextSet,
           analysisName: _sessionState.currentAgents?.name || "",
           userId: _sessionState.userId,
         },

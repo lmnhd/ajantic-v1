@@ -47,10 +47,6 @@ import {
 
 import {
   cn,
-  //UTILS_getAgentToolsByName,
-  UTILS_getAgentToolsDescriptions,
-  UTILS_getAgentToolsEmulatorsByName,
-  UTILS_getRandomColor,
   UTILS_getRandomTailwindColor,
   UTILS_isToolAgent,
   UTILS_putGenericData,
@@ -120,7 +116,7 @@ const AgentPromptsContainer = ({
   setLocalStateObject: (localStateObject: AISessionState) => void;
   setAIMessages: (globalMessages: GlobalMessages) => void;
   handleChangeIndex: () => void;
-  handleAutoPrompt: (e: any) => void;
+  handleAutoPrompt: (e: string) => Promise<void>;
   autoPromptModel: ModelArgs;
   handleAutoPromptModelChange: (e: string) => void;
   autoPromptExtraInfo: string;
@@ -355,7 +351,7 @@ export default function AgentComponent({
     teams: { id: number; name: string; objectives: string }[];
   };
   manualLoadAgentState: (id: number) => void;
-  handleAutoPrompt: (e: any) => void;
+  handleAutoPrompt: (e: string) => Promise<void>;
   autoPromptModel: ModelArgs;
   handleAutoPromptModelChange: (e: string) => void;
   autoPromptExtraInfo: string;
@@ -502,8 +498,7 @@ export default function AgentComponent({
     Object.values(AI_Agent_Tools)
       .filter(
         (tool) =>
-          tool !== AI_Agent_Tools.AGENT_GLOBAL_STATE &&
-          tool !== AI_Agent_Tools.AGENTIC_TOOLS
+          tool !== AI_Agent_Tools.AGENT_GLOBAL_STATE
       )
       .forEach((tool) => {
         result.push(tool);
@@ -852,7 +847,7 @@ export default function AgentComponent({
           <AgentComponentField name="Model">
             <ModelProviderSelect
               localState={localStateObject}
-              setLocalState={setLocalStateObject}
+              
               model={
                 localStateObject.currentAgents.agents[agent_index].modelArgs
               }

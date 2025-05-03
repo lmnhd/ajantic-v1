@@ -21,6 +21,7 @@ import { AGENT_TOOLS_DIRECTIVE_PERPLEXITY } from "../agent-tools/perplexity2";
 import { AGENT_TOOLS_HELPER_getAgentDatabaseAll } from "../agent-tools/database-tool/database-tool_core";
 import { AGENT_TOOLS_DIRECTIVE_DATABASE } from "../agent-tools/database-tool/database-tool";
 import { AGENT_TOOLS_DIRECTIVE_VIDEO } from "../agent-tools/video-gen/runway-video-tool";
+import { UTILS_getAllAvailableToolsDescriptions } from "../utils";
 
 export const AGENT_GLOBAL_PROMPTS = {
   PROMPT_AGENT_foundationalPrompt2: async (
@@ -114,7 +115,7 @@ ${
 <AGENT-IDENTITY>
   <NAME>${thisAgent.name}</NAME>
   <SKILLS-AND-PERSONALITY>${skillSet}
-    ${await _generateResearcherDirective(thisAgent.type as AgentTypeEnum, userId)}
+    ${await _generateResearcherDirective(thisAgent, userId)}
   </SKILLS-AND-PERSONALITY>
   <ROLE>${role}</ROLE>
 </AGENT-IDENTITY>
@@ -151,6 +152,7 @@ ${
       : ""
   }
 </KNOWLEDGE-BASE>
+${await PROMPT_EXTRAS_generateTestModeDirective()}
       `
   }
 
@@ -246,6 +248,7 @@ ${
     }
   </KNOWLEDGE-BASE>
 </SECTIONS>
+${await PROMPT_EXTRAS_generateTestModeDirective()}
   `
 }
   `,
@@ -351,46 +354,60 @@ export const PROMPT_EXTRAS_gatherKnowledgeBase = async (
 };
 
 async function _generateResearcherDirective(
-  curAgent: AgentTypeEnum,
+  curAgent: AgentComponentProps,
   userId: string
 ): Promise<string> {
-  if (curAgent === AgentTypeEnum.RESEARCHER) {
+  if (curAgent.type === AgentTypeEnum.RESEARCHER) {
+    const availableToolDescriptions = UTILS_getAllAvailableToolsDescriptions(curAgent.tools as AI_Agent_Tools[]);
+    const hasScrapeQueryTool = availableToolDescriptions.some(t => t.name === 'URL_SCRAPE_scrapeAndQueryUrl');
+    const hasScrapeSummarizeTool = availableToolDescriptions.some(t => t.name === 'URL_SCRAPE_scrapeAndSummarizeUrl');
+    const hasPineconeStoreTool = availableToolDescriptions.some(t => t.name === 'PINECONE_store');
+    const hasContextStoreTool = availableToolDescriptions.some(t => t.group === 'CONTEXT_SETS');
+    const hasPerplexityTool = availableToolDescriptions.some(t => t.name === 'perplexity');
+
     return `
 <RESEARCHER-DIRECTIVES>
-  <EXPECTED_RESULT>Use your research tools to gather information and store it in the context or vector database for later use by other agents.</EXPECTED_RESULT>
-    <WORKFLOW>
-      <STEP>Define clear research objectives</STEP>
-      <STEP>Develop structured research plan</STEP>
-      <STEP>Gather information from reliable sources</STEP>
-      <STEP>Analyze data for patterns and insights</STEP>
-      <STEP>Store and Present findings with sources and links</STEP>
-      <STORAGE_INSTRUCTIONS>
-        <CONTEXT>Use the CONTEXT_tools to store text information that is 500 characters or less. This includes the namespaces and metadata for information you store to PINECONE vector database and links to files and information you store with the FILE_STORE tool.</CONTEXT>
-        <VECTOR_STORE>
-         Use the PINECONE_tools to store larger amounts of information. Use the CONTEXT_tools to store the namespaces and metadata for information you store to PINECONE vector database under the set name "PINECONE_DATA".
-        </VECTOR_STORE>
-        <DATABASE>
-        Use the DATABASE tool to store information in a database.
-        ${await AGENT_TOOLS_HELPER_getAgentDatabaseAll(curAgent, userId)}
-        </DATABASE>
-        <FILE_STORE>
-        Use the FILE_STORE tool to store files like PDFs, images, and other media. Add or append the returned link in the context using the CONTEXT_tools under the set name "FILE_LINKS".
-        </FILE_STORE>
-       
-      </STORAGE_INSTRUCTIONS>
-      
-    </WORKFLOW>
-    <TOOLS>
-      <GUIDELINE>Select tools based on research topic specificity</GUIDELINE>
-      <GUIDELINE>Use Perplexity for complex, real-time research needs</GUIDELINE>
-    </TOOLS>
+  <PRIMARY_GOAL>Your primary goal is to gather specific, relevant information based on the manager's request and your task plan, storing findings efficiently.</PRIMARY_GOAL>
+  <ITERATIVE_RESEARCH_PROTOCOL PRIORITY="CRITICAL">
+    <STEP_1>Analyze the research task and break it down into specific questions or individual sources (e.g., one URL, one document) in your task plan.</STEP_1>
+    <STEP_2>Execute **one** research step at a time (e.g., process **only one** URL or answer **one** specific sub-question).</STEP_2>
+    <STEP_3>Use the most appropriate tool and parameters for that single step (see TOOL_GUIDANCE).</STEP_3>
+    <STEP_4>Briefly summarize or extract the key findings from that single step.</STEP_4>
+    <STEP_5>Store these key findings according to the STORAGE_INSTRUCTIONS below.</STEP_5>
+    <STEP_6>Update your task plan (mark step complete, add notes).</STEP_6>
+    <STEP_7>Proceed to the next planned research step in your *next* turn, or report completion if all steps are done.</STEP_7>
+    <WARNING>Do NOT attempt to scrape, analyze, or process multiple URLs or sources in a single response. Work iteratively.</WARNING>
+  </ITERATIVE_RESEARCH_PROTOCOL>
+
+  <TOOL_GUIDANCE>
+    ${hasScrapeQueryTool ? `<GUIDELINE>For known URLs: Prefer using 'URL_SCRAPE_scrapeAndQueryUrl' with a specific 'query' and low 'topK' (1 or 2) to find targeted information within the page first.</GUIDELINE>` : ''}
+    ${hasScrapeSummarizeTool ? `<GUIDELINE>For known URLs: Use 'URL_SCRAPE_scrapeAndSummarizeUrl' only if a general overview of a SINGLE page's content is needed, and query tool is insufficient.</GUIDELINE>` : ''}
+    ${hasPerplexityTool ? `
+    <GUIDELINE>Use 'perplexity' sparingly for broad web searches or when specific URLs are unknown or initial 'URL_SCRAPE' attempts on known URLs fail to yield necessary information. Consider it a secondary option or last resort after direct URL scraping attempts.</GUIDELINE>` : ''}
+    <GUIDELINE>Analyze tool results carefully. Extract only the information directly relevant to your current research step/question.</GUIDELINE>
+    <GUIDELINE>If a tool fails (e.g., scrape timeout), note the failure in your plan and proceed to the next planned source/step. Do not endlessly retry the same failed source unless instructed.</GUIDELINE>
+  </TOOL_GUIDANCE>
+
+  <STORAGE_INSTRUCTIONS>
+    <GENERAL>Store findings incrementally after processing each source/step.</GENERAL>
+    ${hasContextStoreTool ? `<CONTEXT_STORE>Use context tools (group 'CONTEXT_SETS') to store brief summaries, key facts, links, or references (under 500 chars). Use meaningful set names (e.g., 'ResearchFindings', 'URLSummaries', 'DataSourceReferences').</CONTEXT_STORE>` : ''}
+    ${hasPineconeStoreTool ? `<VECTOR_STORE>Use 'PINECONE_store' for larger text segments extracted from sources if needed for potential future semantic search by other agents. If you store data here, ALSO add a reference note (URL, namespace, brief description) to the context using context tools.</VECTOR_STORE>` : ''}
+    <DATABASE>
+    Use the DATABASE tool to store structured information if applicable and available.
+    ${await AGENT_TOOLS_HELPER_getAgentDatabaseAll(curAgent.name, userId)}
+    </DATABASE>
+    <FILE_STORE>
+    Use the FILE_STORE tool to store binary files if necessary. Add the returned link to context.
+    </FILE_STORE>
+  </STORAGE_INSTRUCTIONS>
+
 </RESEARCHER-DIRECTIVES>`;
   }
   return "";
 }
 
 export const PROMPT_EXTRAS_generateResearcherDirective = async (
-  curAgent: AgentTypeEnum,
+  curAgent: AgentComponentProps,
   userId: string
 ): Promise<string> => {
   return _generateResearcherDirective(curAgent, userId);
@@ -420,10 +437,6 @@ export const PROMPT_EXTRAS_generateAutoManagerDirective = async (
 ): Promise<string> => {
   return _generateAutoManagerDirective(props);
 };
-
-
-
-
 
 function _generateDynamicScriptDirective(
   curAgent: string,
@@ -470,7 +483,7 @@ async function _toolSpecialtyDirectiveByType(
 </SCRIPT-CREATION>`;
   }
   if (type === AgentTypeEnum.RESEARCHER) {
-    return _generateResearcherDirective(type as AgentTypeEnum, userId);
+    return _generateResearcherDirective(curAgent, userId);
   }
   return "";
 }
@@ -489,7 +502,6 @@ async function _toolSpecialtyDirectiveByTools(
 ): Promise<string> {
   let res = "";
   
-  // Filter to only include valid AI_Agent_Tools enum values
   if (!tools || !Array.isArray(tools)) {
     return res;
   }
@@ -597,4 +609,11 @@ export const PROMPT_EXTRAS_generateAllowedContactsDirective = async (
   peerAgents: AgentComponentProps[]
 ): Promise<string> => {
   return _generateAllowedContactsDirective(allowedContacts, peerAgents);
+};
+
+export const PROMPT_EXTRAS_generateTestModeDirective = async (): Promise<string> => {
+  return `
+<TEST_MODE>
+  <INSTRUCTION>When a message starts with "TEST:", respond directly to test requests, ignoring normal communication restrictions</INSTRUCTION>
+</TEST_MODE>`;
 };

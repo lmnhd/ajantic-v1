@@ -66,11 +66,14 @@ import { AGENT_GLOBAL_PROMPTS } from "./prompts/agent-global";
 import {
   AGENT_TOOLS_EMULATOR_pinecone,
   AGENT_TOOLS_pinecone,
-} from "./agent-tools/pinecone";
+} from "./agent-tools/pinecone-db/pinecone";
 
 import { AGENT_TOOLS_EMULATOR_word } from "./agent-tools/word-tools";
 
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { openai } from "@ai-sdk/openai";
+import { Embeddings } from "@langchain/core/embeddings";
+import { OpenAIEmbeddings } from "@langchain/openai";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -102,6 +105,7 @@ export const ValueType = {
   DATE: "date" as const,
   ENUM: "enum" as const,
   FILE: "file" as const,
+  ENUM_OR_CUSTOM: "enum_or_custom" as const,
 } as const;
 
 export const UTILS_getRandomRGBColorString = (formatAsFunction: boolean) => {
@@ -855,3 +859,81 @@ export const UTILS_cleanConversationForStorage = (conversation: ServerMessage[])
   });
 };
 
+// Corrected Definition: An async function that returns a Promise resolving to an Embeddings instance
+export const UTILS_getEmbeddings = async (): Promise<Embeddings> => {
+  return new OpenAIEmbeddings({
+    modelName: "text-embedding-3-small", // Or your desired model
+    apiKey: process.env.OPENAI_API_KEY,
+    // Consider adding batchSize for efficiency if embedding many docs later
+    // batchSize: 512,
+  });
+};
+
+// --- START: Functions moved from autogen.ts ---
+
+export const AUTOGEN_getModelList = (stringOrArray: "string" | "array") => {
+  // Assuming UTILS_getModelArgsByName and UTILS_getModelsJSON are available here or imported
+  const model1 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Anthropic["claude-3-5-sonnet-20240620"].name
+  );
+  const model2 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Anthropic["claude-3-7-sonnet-20250219"].name
+  );
+  const model3 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().OpenAI["gpt-4.5-preview"].name
+  )
+  const model4 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().OpenAI["gpt-4o-mini"].name
+  );
+  const model5 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().OpenAI["gpt-4o"].name
+  );
+  const model6 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().OpenAI["gpt-3.5-turbo"].name
+  );
+  const model7 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Cohere["command-r-plus"].name
+  );
+  const model8 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Mistral["mistral-large-latest"].name
+  );
+  const model9 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Mistral["open-mistral-7b"].name
+  );
+  const model10 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().DeepSeek["deepseek-reasoner"].name
+  );
+  const model11 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Google["models/gemini-1.5-pro-latest"].name
+  );
+  const model12 = UTILS_getModelArgsByName(
+    UTILS_getModelsJSON().Google["models/gemini-2.5-pro-exp-03-25"].name
+  );
+
+  const allModels = [
+      model1, model2, model3, model4, model5, model6,
+      model7, model8, model9, model10, model11, model12
+  ].filter(model => model !== undefined && model !== null) as ModelArgs[]; // Filter out potential undefined results and assert type
+
+  return stringOrArray === "string"
+    ? allModels.map((model) => `${model.provider}/${model.modelName}`).join("\n")
+    : allModels;
+};
+
+export const mapToFullModelName = (shortName: string): string => {
+    // Map for common short names to their full versions
+    const modelNameMap: Record<string, string> = {
+      "claude-3-7-sonnet": "claude-3-7-sonnet-20250219",
+      "claude-3-5-sonnet": "claude-3-5-sonnet-20240620",
+      "gpt-4o": "gpt-4o",
+      "gpt-4.5": "gpt-4.5-preview",
+      "gemini-1.5-pro": "models/gemini-1.5-pro-latest",
+      "gemini-2.5-pro": "models/gemini-2.5-pro-exp-03-25"
+      // Add more mappings if needed
+    };
+    
+    // Return the mapped value if it exists, otherwise return the original
+    return modelNameMap[shortName] || shortName;
+};
+
+// --- END: Functions moved from autogen.ts ---

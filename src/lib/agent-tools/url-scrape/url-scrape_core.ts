@@ -12,58 +12,174 @@ import FirecrawlApp, {
 import { SERVER_storeGeneralPurposeData } from "@/src/lib/server";
 import puppeteer from "puppeteer-core";
 import { logger } from "@/src/lib/logger";
+import { MODEL_JSON, UTILS_getEmbeddings, UTILS_getModelArgsByName } from "../../utils";
+
+// --- NEW IMPORTS ---
+import { TOOLFUNCTION_split_text } from "@/src/app/api/tools/splitters"; // Assuming path
+import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { Document as LangchainDocument } from "@langchain/core/documents";
+import { Embeddings } from "@langchain/core/embeddings"; // Import base Embeddings type
+import { OpenAIEmbeddings } from "@langchain/openai";
 
 /**
- * Core function to scrape and summarize a URL
+ * Core function to scrape and summarize a URL (Optimized)
  */
 export async function CORE_scrapeAndSummarizeUrl(url: string) {
   let result = "";
   try {
     const app = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
-    logger.tool("Starting webpage scrape", {
-      action: "URL_SCRAPE_START",
-      url,
-    });
+    logger.tool("Starting webpage scrape", { action: "URL_SCRAPE_START", url });
+    console.log(`[TOOL] Starting webpage scrape: ${url}`);
 
+    // Ensure HTML format is requested
     const scrapeResponse = await app.scrapeUrl(url, {
-      formats: ["markdown", "html"],
+      formats: ["markdown", "html"], // Keep markdown for potential fallback or other uses
     });
 
+    // 1. Handle failure case first
     if (!scrapeResponse.success) {
-      logger.error("Failed to scrape webpage", {
+      const errorMsg = `Failed to scrape webpage. Error: ${scrapeResponse.error || 'Unknown scrape error.'}`;
+      logger.error(errorMsg, {
         action: "URL_SCRAPE_FAILED",
         url,
         error: scrapeResponse.error,
       });
-      throw new Error(`Failed to scrape: ${scrapeResponse.error}`);
+      console.error(`[TOOL_ERROR] Scrape Failed: ${url} - ${errorMsg}`);
+      throw new Error(errorMsg);
     }
 
-    logger.tool("Generating summary of webpage content", {
-      action: "URL_SUMMARIZE_START",
-      contentLength: scrapeResponse.markdown?.length || 0,
+    // 2. Handle success case, but missing HTML
+    if (!scrapeResponse.html) {
+      const errorMsg = `Scrape successful, but HTML content missing.`;
+      logger.error(errorMsg, {
+        action: "URL_SCRAPE_HTML_MISSING",
+        url,
+      });
+      console.error(`[TOOL_ERROR] Scrape HTML Missing: ${url} - ${errorMsg}`);
+      // Fallback to markdown if available (only reachable if success is true)
+      if (scrapeResponse.markdown) {
+         logger.warn("Falling back to summarizing raw markdown due to missing HTML content.", { url });
+         console.warn(`[TOOL_WARN] Falling back to summarizing raw markdown for ${url}`);
+         // Implement markdown summarization logic here if desired
+         // For now, return error indicating fallback not implemented
+         return `Error: Scrape successful but HTML missing, and fallback to Markdown summary is not implemented.`;
+      } else {
+         // If success is true, but no HTML and no Markdown, it's an issue.
+         const finalErrorMsg = `Scrape successful, but both HTML and Markdown content are missing.`;
+         logger.error(finalErrorMsg, { action: "URL_SCRAPE_CONTENT_MISSING", url });
+         console.error(`[TOOL_ERROR] Scrape Content Missing: ${url} - ${finalErrorMsg}`);
+         throw new Error(finalErrorMsg);
+      }
+    }
+
+    // --- Optimization Start ---
+    logger.tool("Extracting main content using Cheerio", {
+      action: "URL_CONTENT_EXTRACTION_START",
+      htmlLength: scrapeResponse.html.length,
     });
+    console.log(`[TOOL] Extracting main content via Cheerio (HTML length: ${scrapeResponse.html.length}) for: ${url}`);
+
+    const $ = cheerio.load(scrapeResponse.html);
+
+    // Attempt to find main content - adjust selectors based on common patterns
+    let mainContent = "";
+    const selectors = ['article', 'main', '.main', '#main', '.post-content', '#content', '.entry-content', 'body']; // Add more specific selectors if known
+    for (const selector of selectors) {
+        const element = $(selector);
+        if (element.length > 0) {
+            // Remove common clutter *within* the selected element
+            element.find('nav, header, footer, aside, script, style, noscript, iframe, form, button, input, select, textarea, [aria-hidden="true"], .ad, .advertisement, .sidebar, .related-posts, .comments, .share-buttons').remove();
+            mainContent = element.text(); // Get text content
+            if (mainContent.trim().length > 50) { // Basic check if content seems substantial
+                 logger.log(`Extracted content using selector: ${selector}`);
+                 break; // Use the first good match
+            }
+        }
+    }
+
+     // Fallback if no specific selector worked well, use body but still clean
+    if (!mainContent || mainContent.trim().length <= 50) {
+        logger.warn("Could not find specific main content element via selectors, falling back to cleaned body.", { url });
+        const bodyElement = $('body');
+        bodyElement.find('nav, header, footer, aside, script, style, noscript, iframe, form, button, input, select, textarea, [aria-hidden="true"], .ad, .advertisement, .sidebar, .related-posts, .comments, .share-buttons').remove();
+        mainContent = bodyElement.text();
+    }
+
+
+    // Basic cleaning of the extracted text
+    const cleanedContent = mainContent
+        .replace(/\s\s+/g, ' ') // Replace multiple whitespace chars with single space
+        .replace(/(\r\n|\n|\r){2,}/g, '\n') // Replace multiple newlines with single newline
+        .trim();
+
+     const MAX_CONTENT_LENGTH_FOR_SUMMARY = 15000; // Adjust as needed (chars)
+     const truncatedContent = cleanedContent.length > MAX_CONTENT_LENGTH_FOR_SUMMARY
+        ? cleanedContent.substring(0, MAX_CONTENT_LENGTH_FOR_SUMMARY) + "... (content truncated)"
+        : cleanedContent;
+
+
+    if (truncatedContent.length === 0) {
+        logger.warn("Extracted content was empty after cleaning.", { action: "URL_CONTENT_EXTRACTION_EMPTY", url });
+        console.warn(`[TOOL_WARN] Extracted content was empty after cleaning for ${url}`);
+        return "Error: Could not extract meaningful content from the page.";
+    }
+
+    logger.tool("Generating summary of EXTRACTED webpage content", {
+      action: "URL_SUMMARIZE_START",
+      originalContentLength: cleanedContent.length,
+      summarizationInputLength: truncatedContent.length,
+    });
+    // --- Optimization End ---
+
+    const modelForSummary = await MODEL_getModel_ai(UTILS_getModelArgsByName(MODEL_JSON().Google["models/gemini-2.5-pro-exp-03-25"].name));
+    const summaryPrompt = `You have been provided with the pre-extracted and cleaned main text content from a webpage. Please summarize this content concisely and return it as easy-to-read markdown. Focus on the key information present in the provided text:\n\n---\n${truncatedContent}\n---`;
+    const summaryPromptChars = summaryPrompt.length;
+
+    logger.tool("Generating summary of EXTRACTED webpage content", {
+      action: "URL_SUMMARIZE_START",
+      modelId: modelForSummary.modelId,
+      originalContentLength: cleanedContent.length,
+      summarizationInputLength: truncatedContent.length,
+      promptChars: summaryPromptChars
+    });
+    console.log(`[TOOL] Generating summary for ${url}: Model=${modelForSummary.modelId}, InputChars=${truncatedContent.length}, PromptChars=${summaryPromptChars}`);
+
+    if (summaryPromptChars > 18000) {
+        logger.warn(`[CORE_scrapeAndSummarizeUrl] Summary prompt is large (~${summaryPromptChars} chars), potentially exceeding limits.`, { url });
+        console.warn(`[TOOL_WARN] Summary prompt is large (~${summaryPromptChars} chars) for ${url}`);
+    }
 
     const response2 = await generateText({
-      model: await MODEL_getModel_ai({
-        modelName: "gpt-4o-mini",
-        provider: ModelProviderEnum.OPENAI,
-        temperature: 0,
-      }),
-      prompt: `Extract and summarize the PRIMARY content of this page only and return it as easy to read markdown. Ignore all extraneous elements and info like ads, scripts, navigation, etc: ${scrapeResponse.markdown}`,
+      model: modelForSummary,
+      prompt: summaryPrompt,
     });
 
     result = response2.text;
-    logger.tool("Webpage summary generated", {
+    logger.tool("Webpage summary generated from extracted content", {
       action: "URL_SUMMARIZE_COMPLETE",
+      modelId: modelForSummary.modelId,
       summaryLength: result.length,
+      inputTokens: response2.usage?.promptTokens,
+      outputTokens: response2.usage?.completionTokens,
+      totalTokens: response2.usage?.totalTokens,
+      finishReason: response2.finishReason,
     });
+    console.log(`[TOOL] Summary complete for ${url}: ` +
+        `Model=${modelForSummary.modelId}, ` +
+        `SummaryLen=${result.length}, ` +
+        `InTokens=${response2.usage?.promptTokens || 'N/A'}, ` +
+        `OutTokens=${response2.usage?.completionTokens || 'N/A'}, ` +
+        `TotalTokens=${response2.usage?.totalTokens || 'N/A'}, ` +
+        `FinishReason=${response2.finishReason || 'N/A'}`
+    );
   } catch (error) {
-    logger.error("Failed to process webpage", {
-      action: "URL_PROCESS_ERROR",
+    logger.error("Failed to process webpage for summary", {
+      action: "URL_PROCESS_SUMMARY_ERROR",
       url,
       error: error instanceof Error ? error.message : String(error),
     });
-    result = `Error: ${error}`;
+    console.error(`[TOOL_ERROR] Failed to process summary for ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    result = `Error summarizing URL ${url}: ${error instanceof Error ? error.message : String(error)}`;
   }
   return result;
 }
@@ -324,4 +440,156 @@ export async function TEST_AGENT_CREATE_GMAIL() {
     });
     return `Error: ${error}`;
   }
+}
+
+/**
+ * Core function to scrape a URL, chunk its content, store temporarily in Memory,
+ * query it, and return relevant chunks.
+ */
+export async function CORE_scrapeAndQueryUrl(url: string, query: string, topK: number = 3) {
+  try {
+    const embeddings: Embeddings = await UTILS_getEmbeddings();
+    if (!embeddings) {
+        console.error("[TOOL_ERROR] Failed to initialize embeddings for scrapeAndQueryUrl");
+        throw new Error("Failed to initialize embeddings.");
+    }
+
+    const app = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+    logger.tool("Starting webpage scrape for query", { action: "URL_SCRAPE_QUERY_START", url, query });
+    console.log(`[TOOL] Starting scrape for query: URL=${url}, Query=${query.substring(0,50)}...`);
+
+    // 1. Scrape (HTML only needed)
+    const scrapeResponse = await app.scrapeUrl(url, { formats: ["html"] });
+
+    // Handle scrape failure or missing HTML
+    if (!scrapeResponse.success) {
+        const errorMsg = `Failed to scrape webpage. Error: ${scrapeResponse.error || 'Unknown scrape error.'}`;
+        logger.error(errorMsg, { action: "URL_SCRAPE_FAILED", url, error: scrapeResponse.error });
+        console.error(`[TOOL_ERROR] Scrape Failed (Query): ${url} - ${errorMsg}`);
+        throw new Error(errorMsg);
+    }
+    if (!scrapeResponse.html) {
+        const errorMsg = `Scrape successful, but HTML content missing.`;
+        logger.error(errorMsg, { action: "URL_SCRAPE_HTML_MISSING", url });
+        console.error(`[TOOL_ERROR] Scrape HTML Missing (Query): ${url} - ${errorMsg}`);
+        throw new Error(errorMsg);
+    }
+
+    // 2. Extract & Clean Content (using Cheerio)
+    logger.tool("Extracting main content via Cheerio", { action: "URL_CONTENT_EXTRACTION_START", htmlLength: scrapeResponse.html.length });
+    console.log(`[TOOL] Extracting content via Cheerio (Query): URL=${url}, HTML length=${scrapeResponse.html.length}`);
+    const $ = cheerio.load(scrapeResponse.html);
+    let mainContent = "";
+    const selectors = ['article', 'main', '.main', '#main', '.post-content', '#content', '.entry-content', 'body'];
+    for (const selector of selectors) {
+        const element = $(selector);
+        if (element.length > 0) {
+            element.find('nav, header, footer, aside, script, style, noscript, iframe, form, button, input, select, textarea, [aria-hidden="true"], .ad, .advertisement, .sidebar, .related-posts, .comments, .share-buttons').remove();
+            mainContent = element.text();
+            if (mainContent.trim().length > 50) {
+                 logger.log(`Extracted content using selector: ${selector}`);
+                 break;
+            }
+        }
+    }
+    if (!mainContent || mainContent.trim().length <= 50) {
+        logger.warn("Could not find specific main content element, falling back to cleaned body.", { url });
+        const bodyElement = $('body');
+        bodyElement.find('nav, header, footer, aside, script, style, noscript, iframe, form, button, input, select, textarea, [aria-hidden="true"], .ad, .advertisement, .sidebar, .related-posts, .comments, .share-buttons').remove();
+        mainContent = bodyElement.text();
+    }
+    const cleanedContent = mainContent.replace(/\s\s+/g, ' ').replace(/(\r\n|\n|\r){2,}/g, '\n').trim();
+
+    if (cleanedContent.length === 0) {
+      logger.warn("Extracted content was empty after cleaning.", { url });
+      console.warn(`[TOOL_WARN] Extracted content empty (Query) for ${url}`);
+      return "Error: Could not extract meaningful content from the page.";
+    }
+    logger.tool("Content extracted and cleaned", { action: "URL_CONTENT_EXTRACTION_COMPLETE", contentLength: cleanedContent.length });
+    console.log(`[TOOL] Content extracted/cleaned (Query): URL=${url}, Length=${cleanedContent.length}`);
+
+    // 3. Chunk Text
+    const chunkSize = 1000;
+    const chunkOverlap = 150;
+    const textChunks = await TOOLFUNCTION_split_text(cleanedContent, chunkSize, chunkOverlap);
+    if (!textChunks || textChunks.length === 0) {
+        console.error(`[TOOL_ERROR] Failed to split text into chunks for ${url}`);
+        return "Error: Failed to split extracted content into chunks.";
+    }
+    logger.tool("Text split into chunks", { action: "URL_TEXT_CHUNKED", chunkCount: textChunks.length });
+    console.log(`[TOOL] Text split (Query): URL=${url}, Chunks=${textChunks.length}`);
+
+    // 4. Create Langchain Documents
+    const documents = textChunks.map((chunk, index) => new LangchainDocument({
+        pageContent: chunk.pageContent,
+        metadata: {
+            url: url,
+            chunk: index + 1,
+            totalChunks: textChunks.length,
+        },
+    }));
+
+    // 5. Create In-Memory Vector Store and Add Documents
+    logger.tool("Creating in-memory vector store and adding documents", { action: "URL_MEMSTORE_ADD_START", chunkCount: documents.length });
+    console.log(`[TOOL] Creating MemoryVectorStore (Query): URL=${url}, Docs=${documents.length}`);
+    const vectorStore = await MemoryVectorStore.fromDocuments(documents, embeddings);
+    logger.tool("In-memory vector store populated", { action: "URL_MEMSTORE_ADD_COMPLETE" });
+    console.log(`[TOOL] MemoryVectorStore populated (Query): URL=${url}`);
+
+    // 6. Search Memory Vector Store
+    logger.tool("Searching in-memory vector store", {
+        action: "URL_MEMSTORE_SEARCH_START",
+        query: query.substring(0, 50) + "...",
+        topK: topK
+    });
+    console.log(`[TOOL] Searching MemoryVectorStore (Query): URL=${url}, Query=${query.substring(0,50)}..., topK=${topK}`);
+    const searchResults = await vectorStore.similaritySearchWithScore(query, topK);
+    logger.tool("In-memory search complete", { action: "URL_MEMSTORE_SEARCH_COMPLETE", resultsCount: searchResults?.length || 0 });
+    console.log(`[TOOL] Search complete (Query): URL=${url}, Results=${searchResults?.length || 0}`);
+
+    // 7. Format Results
+    if (!searchResults || searchResults.length === 0) {
+      return "No relevant information found on the page for your query.";
+    }
+
+    const formattedResults = searchResults
+      // Optional: Filter out low-scoring results if needed
+      // .filter(([doc, score]) => score > 0.7) // Example threshold
+      .map(([doc, score]) => {
+          const scoreStr = score ? ` (Score: ${score.toFixed(3)})` : '';
+          const chunkNum = doc.metadata?.chunk;
+          const totalChunks = doc.metadata?.totalChunks;
+          const header = chunkNum && totalChunks ? `[Chunk ${chunkNum}/${totalChunks}${scoreStr}]` : `[Relevant Chunk${scoreStr}]`;
+          return `${header}\n${doc.pageContent}`;
+      })
+      .join("\n\n---\n\n"); // Separator between chunks
+
+    // --- START EDIT: Add Truncation ---
+    const MAX_RETURN_LENGTH = 4000; // Adjust this character limit as needed (e.g., ~1000 tokens)
+
+    const finalOutput = formattedResults.length > MAX_RETURN_LENGTH
+        ? formattedResults.substring(0, MAX_RETURN_LENGTH) + "\n\n... (results truncated due to length)"
+        : formattedResults;
+
+    logger.tool("Formatted and potentially truncated query results prepared for return", {
+        action: "URL_QUERY_RESULT_FINALIZED", url: url, query: query.substring(0,50)+"...",
+        originalFormattedLength: formattedResults.length, finalReturnedLength: finalOutput.length,
+        wasTruncated: formattedResults.length > MAX_RETURN_LENGTH
+    });
+    console.log(`[TOOL] Returning query results for ${url}: OrigLen=${formattedResults.length}, FinalLen=${finalOutput.length}, Truncated=${formattedResults.length > MAX_RETURN_LENGTH}`);
+
+    return finalOutput; // <-- Return the potentially truncated string
+    // --- END EDIT ---
+
+  } catch (error) {
+    logger.error("Failed to process webpage for query", {
+      action: "URL_SCRAPE_QUERY_ERROR",
+      url,
+      query,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    console.error(`[TOOL_ERROR] Failed during scrape/query for ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    return `Error scraping or querying URL ${url}: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  // No 'finally' block needed for cleanup as MemoryVectorStore is garbage collected
 } 

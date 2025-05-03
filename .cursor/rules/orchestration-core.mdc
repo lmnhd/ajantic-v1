@@ -1,0 +1,16 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Agent Orchestration Core Logic
+
+The primary logic for executing agent turns resides in [src/lib/orchestration/utils/agent-execution.ts](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts). This file contains two key functions:
+
+1.  `ORCHESTRATION_executeAgentTurn`: Handles turns for standard "worker" agents. It uses `generateText` and includes a validation loop (`_validateWorkerResponse`) if `expectedOutput` criteria are provided by a manager.
+2.  `ORCHESTRATION_executeManagerTurn`: Handles turns for "manager" agents. It uses `generateObject` to get structured directives for workflow control, including task delegation and context updates.
+
+Core type definitions for orchestration state, configuration, inputs, and results are found in [src/lib/orchestration/types/base.ts](mdc:ajantic-v1/src/lib/orchestration/types/base.ts). This includes `AgentTurnResult`, `OrchestrationConfig`, `OrchestrationState`, and the `ValidationSchema` used by worker agents.
+
+Prompt generation logic is primarily driven by [src/lib/orchestration/prompt/orchestration-prompt-select.ts](mdc:ajantic-v1/src/lib/orchestration/prompt/orchestration-prompt-select.ts) and specific prompt templates like those in [src/lib/orchestration/prompt/orchestration-prompt.ts](mdc:ajantic-v1/src/lib/orchestration/prompt/orchestration-prompt.ts). The context object used for prompt generation is defined in [src/lib/orchestration/types/prompt.ts](mdc:ajantic-v1/src/lib/orchestration/types/prompt.ts).
+

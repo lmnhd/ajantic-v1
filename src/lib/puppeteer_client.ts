@@ -1,83 +1,101 @@
 import puppeteer from "puppeteer-core";
-import { createSession } from "./agent-tools/browserbase";
+import { createSession } from "@/src/lib/agent-tools/puppeteer-tool/puppeteer_core";
 
 declare global {
     var puppeteer_client: puppeteer.Browser | undefined
     var puppeteer_page: puppeteer.Page | undefined
+    var puppeteer_initializing: boolean | undefined
 }
 
 const _getPuppeteerClient = async (browserBaseOrLocal: string) => {
     if (browserBaseOrLocal === "browserbase") {
         const sessionId = await createSession();
         const wsUrl = `wss://connect.browserbase.com?apiKey=${process.env.BROWSERBASE_API_KEY}&sessionId=${sessionId}`;
-        return puppeteer.connect({ browserURL: wsUrl });
+        console.log("[Puppeteer Client] Connecting to Browserbase...");
+        return puppeteer.connect({ browserURL: wsUrl, defaultViewport: null });
     } else {
         const findChrome = require('chrome-finder');
+        let executablePath: string | undefined;
         try {
-            const executablePath = findChrome();
-            console.log("Executable path:", executablePath);
-            return puppeteer.launch({ 
-                executablePath,
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
+            executablePath = findChrome();
+            console.log("[Puppeteer Client] Found local Chrome:", executablePath);
         } catch (error) {
-            console.error('Could not find Chrome installation:', error);
-            return puppeteer.launch({ 
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
+            console.error('[Puppeteer Client] Could not find local Chrome installation:', error);
         }
+        console.log("[Puppeteer Client] Launching local Puppeteer...");
+        return puppeteer.launch({
+            executablePath,
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
     }
 }
 
 export const GLOBAL_getPuppeteerClient = async (browserBaseOrLocal: string): Promise<puppeteer.Browser> => {
     console.log("GLOBAL_getPuppeteerClient called");
     
-    try {
-        // Check if existing client and page are still connected
-        if (globalThis.puppeteer_client && globalThis.puppeteer_page) {
-            try {
-                // Test if the browser and page are still responsive
-                await globalThis.puppeteer_page.title();
-                console.log("Using existing puppeteer client and page");
-                return globalThis.puppeteer_client;
-            } catch (error) {
-                console.log("Existing client/page disconnected, creating new ones");
-                globalThis.puppeteer_client = undefined;
-                globalThis.puppeteer_page = undefined;
-            }
-        }
+    while (globalThis.puppeteer_initializing) {
+        console.log("[Puppeteer Client] Waiting for initialization lock...");
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
 
-        // Create new client if needed
-        const newClient = await _getPuppeteerClient(browserBaseOrLocal);
-        
-        // Create new page
-        const newPage = await newClient.newPage();
-        await newPage.setViewport({ width: 1280, height: 800 });
-
-        // Set up disconnection handler
-        newClient.on('disconnected', () => {
-            console.log("Browser disconnected");
+    if (globalThis.puppeteer_client && globalThis.puppeteer_page) {
+        try {
+            await globalThis.puppeteer_page.title();
+            console.log("[Puppeteer Client] Using existing connected instance.");
+            return globalThis.puppeteer_client;
+        } catch (error) {
+            console.log("[Puppeteer Client] Existing instance disconnected.");
             globalThis.puppeteer_client = undefined;
             globalThis.puppeteer_page = undefined;
+        }
+    }
+
+    console.log("[Puppeteer Client] Acquiring initialization lock...");
+    globalThis.puppeteer_initializing = true;
+
+    try {
+        console.log("[Puppeteer Client] No valid instance found, creating new one...");
+        const newClient = await _getPuppeteerClient(browserBaseOrLocal);
+        console.log("[Puppeteer Client] New client created. Creating page...");
+
+        const newPage = await newClient.newPage();
+        await newPage.setViewport({ width: 1280, height: 800 });
+        console.log("[Puppeteer Client] New page created.");
+
+        newClient.on('disconnected', () => {
+            console.log("[Puppeteer Client] Browser disconnected event received.");
+            globalThis.puppeteer_client = undefined;
+            globalThis.puppeteer_page = undefined;
+            globalThis.puppeteer_initializing = false;
         });
 
-        // Use type casting to satisfy the TypeScript compiler
-        globalThis.puppeteer_client = newClient as unknown as puppeteer.Browser;
-        globalThis.puppeteer_page = newPage as unknown as puppeteer.Page;
-        console.log("Created new puppeteer client and page");
-        return newClient as unknown as puppeteer.Browser;
+        globalThis.puppeteer_client = newClient;
+        globalThis.puppeteer_page = newPage;
+        console.log("[Puppeteer Client] New instance assigned globally.");
+        return newClient;
 
     } catch (error) {
-        console.error("Error in GLOBAL_getPuppeteerClient:", error);
+        console.error("Error during Puppeteer client initialization:", error);
+        globalThis.puppeteer_initializing = false;
         throw error;
+    } finally {
+        console.log("[Puppeteer Client] Releasing initialization lock.");
+        globalThis.puppeteer_initializing = false;
     }
 }
 
 export const GLOBAL_getPuppeteerPage = async (): Promise<puppeteer.Page> => {
+    if (!globalThis.puppeteer_page || !globalThis.puppeteer_client?.isConnected()) {
+        console.log("[Puppeteer Page] Page not available or client disconnected, ensuring client is initialized...");
+        await GLOBAL_getPuppeteerClient(process.env.NODE_ENV === 'production' ? 'browserbase' : 'local');
+        if (!globalThis.puppeteer_page) {
+            throw new Error("[Puppeteer Page] Failed to get page even after client initialization attempt.");
+        }
+        console.log("[Puppeteer Page] Page obtained after client initialization.");
+    }
     if (!globalThis.puppeteer_page) {
-        throw new Error("No global page available");
+        throw new Error("[Puppeteer Page] Global page is still not available after checks.");
     }
     return globalThis.puppeteer_page;
 }

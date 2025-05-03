@@ -1,4 +1,6 @@
 import { AgentComponentProps, ContextContainerProps, ModelArgs, ServerMessage, Team } from "@/src/lib/types";
+import { z } from "zod";
+
 
 /**
  * Defines the distinct orchestration types, replacing the previous Mode+Flow combination.
@@ -35,6 +37,8 @@ export interface OrchestrationConfig {
   userActionModelArgs?: ModelArgs; // Model args for handling user action prompts
   factCheck?: boolean; // Flag for potential fact-checking steps
   agentOrder?: "sequential" | "seq-reverse" | "random"; // The order in which agents process for fixed-order workflows
+  stopOnError?: boolean; // If true, workflow stops on agent error; if false, routes to manager. Defaults to true.
+  currentAgentName?: string; // The name of the agent currently processing
 }
 
 /**
@@ -49,10 +53,12 @@ export interface OrchestrationState {
   conversationHistory: ServerMessage[];
   contextSets: ContextContainerProps[];
   currentSummary?: string; // Optional summary of the conversation
-  error?: string; // Error message if the process failed
+  error?: string | null; // Error message if the process failed
   pauseRequested: boolean;
   cancelRequested: boolean;
   continueFromPauseSignal: boolean; // Flag to resume from pause
+  resumableErrorAgentName?: string | null;
+  resumableErrorMessage?: string | null;
 }
 
 /**
@@ -113,7 +119,17 @@ export interface AgentTurnResult {
       validationStrategy?: "exact" | "semantic" | "contains" | "custom" | "simple";
     };
   };
+
+  /** Optional status from worker response validation */
+  validationStatus?: z.infer<typeof ValidationSchema>;
 }
+
+// Add this near other schemas or helpers
+export const ValidationSchema = z.object({
+  meetsCriteria: z.boolean().describe("Does the response meet all the specified criteria?"),
+  reason: z.string().optional().describe("Brief explanation if criteria are not met."),
+});
+
 
 /**
  * Represents the outcome of a single step (often one agent's turn or a routing decision)
@@ -154,4 +170,8 @@ export interface Orchestrator {
   // pause(): Promise<void>;
   // resume(): Promise<void>;
   // cancel(): Promise<void>;
+}
+
+export interface ClientAugmentedServerMessage extends ServerMessage {
+  _recipientAgentName?: string; // Optional client-side field
 }

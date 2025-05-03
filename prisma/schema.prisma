@@ -254,6 +254,7 @@ model AgentComponent {
 
 model CustomTool {
   id                String   @id @default(cuid())
+  userId            String
   name              String
   description       String
   parameters        String   // JSON string
@@ -265,4 +266,5 @@ model CustomTool {
   updatedAt         DateTime @updatedAt
 
   @@index([name])
+  @@unique([userId, name])
 }

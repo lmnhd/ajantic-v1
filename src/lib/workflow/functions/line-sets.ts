@@ -1,58 +1,84 @@
-import { AppFrozenState, ContextContainerProps } from "@/src/lib/types";
+import { ContextContainerProps, GeneralPurpose } from "@/src/lib/types";
+import { AnalysisState } from "../../store/analysis-store";
 import { AnalysisStorage } from "../../storage/analysis-storage";
-import { GeneralPurpose } from "@prisma/client";
+import { AppFrozenState } from "@/src/lib/types";
 
-export function handlePromptTextToSet(text: string, get: Function, set: Function) {
-  const state = get();
+// Handle adding text to a line set
+export const handlePromptTextToSet = (text: string, get: () => AnalysisState, set: any) => {
   const newLineSets = [
-    ...state.contextSets,
+    ...(get().localState.contextSet?.sets || []),
     {
-      text,
-      setName: `Set ${state.contextSets.length + 1}`,
+      setName: `Set ${(get().localState.contextSet?.sets?.length || 0) + 1}`,
       lines: [],
+      text,
       isDisabled: false,
     },
   ];
-  const newState = { ...state, contextSets: newLineSets };
-  set(newState);
+
+  set((state: any) => {
+    return {
+      ...state,
+      localState: {
+        ...state.localState,
+        contextSet: {
+          ...state.localState.contextSet,
+          sets: newLineSets
+        }
+      }
+    };
+  });
 
   // Save to IndexedDB when adding new lineSet
   const frozenState: AppFrozenState = {
-    localState: newState.localState,
-    currentConversation: newState.currentConversation,
-    contextSet: {sets: newLineSets, teamName: state.localState.currentAgents?.name || ""},
+    localState: get().localState,
+    currentConversation: get().currentConversation,
+    contextSet: {sets: newLineSets, teamName: get().localState.currentAgents?.name || ""},
     analysisSet: {
-      contextSet: {sets: newLineSets, teamName: state.localState.currentAgents?.name || ""},
-      analysisName: state.localState.currentAgents?.name || "",
-      userId: state.localState.userId,
+      contextSet: {sets: newLineSets, teamName: get().localState.currentAgents?.name || ""},
+      analysisName: get().localState.currentAgents?.name || "",
+      userId: get().localState.userId,
     },
   };
   AnalysisStorage.FROZEN_STATE_saveToIndexDB(frozenState);
-}
+};
 
-export function deleteTextFromSet(text: string, get: Function, set: Function) {
-  const state = get();
-  const newLineSets = state.contextSets.filter((set: ContextContainerProps) => set.text !== text);
-  const newState = { ...state, contextSets: newLineSets };
-  set(newState);
+// Handle deleting text from a line set
+export const deleteTextFromSet = (text: string, get: () => AnalysisState, set: any) => {
+  const newLineSets = (get().localState.contextSet?.sets || []).filter(
+    (set: ContextContainerProps) => set.text !== text
+  );
+  
+  set((state: any) => {
+    return {
+      ...state,
+      localState: {
+        ...state.localState,
+        contextSet: {
+          ...state.localState.contextSet,
+          sets: newLineSets
+        }
+      }
+    };
+  });
 
   // Save state after lineset change
   AnalysisStorage.FROZEN_STATE_saveToIndexDB({
-    localState: newState.localState,
-    currentConversation: newState.currentConversation,
-    contextSet: {sets: newLineSets, teamName: state.localState.currentAgents?.name || ""},
+    localState: get().localState,
+    currentConversation: get().currentConversation,
+    contextSet: {sets: newLineSets, teamName: get().localState.currentAgents?.name || ""},
     analysisSet: {
-      contextSet: {sets: newLineSets, teamName: state.localState.currentAgents?.name || ""},
-      analysisName: state.localState.currentAgents?.name || "",
-      userId: state.localState.userId,
+      contextSet: {sets: newLineSets, teamName: get().localState.currentAgents?.name || ""},
+      analysisName: get().localState.currentAgents?.name || "",
+      userId: get().localState.userId,
     },
   });
-}
+};
 
 // export function setCurrentContextItem(index: number, set: Function) {
 //   set({ currentContextItem: index });
 // }
 
-export function setLineSetState(states: GeneralPurpose[], set: Function) {
+// Handle setting line set state
+export const setLineSetState = (states: GeneralPurpose[], set: any) => {
   set({ lineSetStates: states });
-} 
+}; 

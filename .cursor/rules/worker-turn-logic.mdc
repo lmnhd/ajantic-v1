@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Worker Agent Turn Execution Flow (ORCHESTRATION_executeAgentTurn)
+
+The execution flow for a standard worker agent in [src/lib/orchestration/utils/agent-execution.ts](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts) follows these steps:
+
+1.  **Extract Criteria:** Checks the conversation history for the most recent manager directive containing `expectedOutput` criteria for the current task.
+2.  **Construct Prompt Context:** Creates an `OrchestrationPromptContext` object, including the task message (potentially appended with criteria details) and the `expectedOutputCriteria` itself.
+3.  **Generate Prompt:** Calls `ORCHESTRATION_generatePrompt` using the context. The prompt template (e.g., `autoProcess_prompt` in [src/lib/orchestration/prompt/orchestration-prompt.ts](mdc:ajantic-v1/src/lib/orchestration/prompt/orchestration-prompt.ts)) may conditionally add specific instructions if `expectedOutputCriteria` are present in the context.
+4.  **Execute `generateText`:** Calls the LLM using `generateText`.
+5.  **Validation Loop (if criteria exist):**
+    *   Calls `_validateWorkerResponse` to check if the `responseText` meets the `expectedOutputCriteria` using a separate `generateObject` call with the `ValidationSchema` from [src/lib/orchestration/types/base.ts](mdc:ajantic-v1/src/lib/orchestration/types/base.ts).
+    *   If validation fails on the first attempt, it adds the failed response and feedback to the conversation history.
+    *   Retries the `generateText` call with the updated history.
+    *   If validation fails again, the loop exits, using the last response.
+6.  **Format Result:** Returns an `AgentTurnResult` containing the final `responseText` and the `validationStatus`.
+

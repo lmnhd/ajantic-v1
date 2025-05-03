@@ -22,6 +22,7 @@ import {
   cn,
   UTILS_getGenericData,
   UTILS_putGenericData,
+  UTILS_updateModelNameAfterProviderChange,
 } from "@/src/lib/utils";
 import { SERVER_getOpenAIModelNames } from "@/src/lib/server";
 import { OpenAIModelNames } from "@/src/app/api/model/openai";
@@ -33,9 +34,26 @@ type ModelProviderSelectProps = {
   index: number;
   localState: AISessionState;
   modelNameChanged?: (e: string) => void;
-  modelProviderChanged?: (e: string) => void;
+  modelProviderChanged?: (e: string | ModelProviderEnum) => void;
   temperatureChanged?: (e: number) => void;
 };
+
+// Helper function to map string back to Enum member
+function mapStringToProviderEnum(providerString: string): ModelProviderEnum | undefined {
+    const upperCaseProvider = providerString?.toUpperCase(); // Ensure uppercase and handle potential null/undefined
+    switch (upperCaseProvider) {
+        case "OPENAI": return ModelProviderEnum.OPENAI;
+        case "ANTHROPIC": return ModelProviderEnum.ANTHROPIC;
+        case "DEEPSEEK": return ModelProviderEnum.DEEPSEEK;
+        case "MISTRAL": return ModelProviderEnum.MISTRAL;
+        case "COHERE": return ModelProviderEnum.COHERE;
+        case "GOOGLE": return ModelProviderEnum.GOOGLE_G; // Assuming "GOOGLE" string maps to GOOGLE_G enum
+        case "BEDROCK": return ModelProviderEnum.BEDROCK;
+        default:
+            console.warn(`Unknown provider string: ${providerString}`);
+            return undefined; // Or handle error appropriately
+    }
+}
 
 export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
   model,
@@ -45,54 +63,24 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
   modelProviderChanged,
   temperatureChanged,
 }) => {
-  const [openAIModelNames, setOpenAIModelNames] = useState<
-    ModelProviderSelectName[]
-  >([]);
   const temperatureRef = useRef<HTMLInputElement>(null);
-  const [tempText, setTempText] = useState("0.7");
-
-  const loadOpenAIModelNames = async () => {
-    if (
-      UTILS_getGenericData("OPENAI_MODEL_NAMES", {
-        currentState: localState,
-        history: [],
-      })
-    ) {
-      const cachedNames = UTILS_getGenericData("OPENAI_MODEL_NAMES", {
-        currentState: localState,
-        history: [],
-      });
-      setOpenAIModelNames(cachedNames);
-      return cachedNames;
-    } else {
-      const modelNames: ModelProviderSelectName[] =
-        await SERVER_getOpenAIModelNames();
-      UTILS_putGenericData(modelNames, "OPENAI_MODEL_NAMES", {
-        currentState: localState,
-        history: [],
-      });
-      setOpenAIModelNames(modelNames);
-      return modelNames;
-    }
-  };
+  const [tempText, setTempText] = useState<string>(
+    (model.temperature ?? 0.7).toString()
+  );
 
   useEffect(() => {
-    if (temperatureRef.current) {
-      setTempText(temperatureRef.current.value);
-    }
-  }, [temperatureRef.current?.value]);
+    setTempText((model.temperature ?? 0.7).toString());
+  }, [model.temperature]);
 
-  useEffect(() => {
-    loadOpenAIModelNames();
-  }, [localState]);
+  const providerStringValue = model.provider ? String(model.provider).toUpperCase() : undefined;
 
   return (
     <div>
       <Select
-        value={model.provider}
-        onValueChange={(e) => {
+        value={providerStringValue}
+        onValueChange={(stringValue) => {
           if (modelProviderChanged) {
-            modelProviderChanged(e as ModelProviderEnum);
+            modelProviderChanged(stringValue);
           }
         }}
       >
@@ -100,15 +88,13 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
           <SelectValue placeholder="Select a model provider" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ModelProviderEnum.ANTHROPIC}>Anthropic</SelectItem>
-          <SelectItem value={ModelProviderEnum.OPENAI}>OpenAI</SelectItem>
-          <SelectItem value={ModelProviderEnum.DEEPSEEK}>DeepSeek</SelectItem>
-          <SelectItem value={ModelProviderEnum.MISTRAL}>Mistral</SelectItem>
-          <SelectItem value={ModelProviderEnum.COHERE}>Cohere</SelectItem>
-          <SelectItem value={ModelProviderEnum.GOOGLE_G}>
-            Google GenAI
-          </SelectItem>
-          <SelectItem value={ModelProviderEnum.BEDROCK}>Bedrock</SelectItem>
+          <SelectItem value="ANTHROPIC">Anthropic</SelectItem>
+          <SelectItem value="OPENAI">OpenAI</SelectItem>
+          <SelectItem value="DEEPSEEK">DeepSeek</SelectItem>
+          <SelectItem value="MISTRAL">Mistral</SelectItem>
+          <SelectItem value="COHERE">Cohere</SelectItem>
+          <SelectItem value="GOOGLE">Google GenAI</SelectItem>
+          <SelectItem value="BEDROCK">Bedrock</SelectItem>
         </SelectContent>
       </Select>
       <Select
@@ -124,11 +110,14 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
         </SelectTrigger>
         <SelectContent>
           {model.provider === ModelProviderEnum.OPENAI &&
-            Object.keys(modelsData.OpenAI).map((modelName) => (
-              <SelectItem key={modelName} value={modelName}>
-                {modelName}
-              </SelectItem>
-            ))}
+            (() => {
+              console.log(`>>> Condition MET: Rendering OpenAI models from modelsData.json`);
+              return Object.keys(modelsData.OpenAI).map((modelName) => (
+                <SelectItem key={modelName} value={modelName}>
+                  {modelName}
+                </SelectItem>
+              ));
+            })()}
           {model.provider === ModelProviderEnum.ANTHROPIC &&
             Object.keys(modelsData.Anthropic).map((modelName) => (
               <SelectItem key={modelName} value={modelName}>
@@ -161,8 +150,6 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
             ))}
         </SelectContent>
       </Select>
-      {/* Temperature Input (if needed, keep separate) */}
-      {/* Example - using direct callback */}
       {temperatureChanged && (
         <div className="mt-2">
           <label
@@ -173,15 +160,16 @@ export const ModelProviderSelect: React.FC<ModelProviderSelectProps> = ({
           </label>
           <input
             id={`temp-range-${index}`}
+            ref={temperatureRef}
             type="range"
             min="0"
             max="1"
             step="0.1"
-            value={tempText} // Use controlled value
-            // defaultValue={model.temperature || 0.7} // Remove default value for controlled input
+            value={tempText}
             onChange={(e) => {
-              setTempText(e.target.value); // Update local text state
-              temperatureChanged(parseFloat(e.target.value));
+              const newTemp = parseFloat(e.target.value);
+              setTempText(e.target.value);
+              temperatureChanged(newTemp);
             }}
             className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
           />
@@ -211,6 +199,34 @@ export default function ModelSelectGroup({
             model={model}
             index={index}
             localState={localState}
+            modelProviderChanged={(providerValue) => {
+              const actualEnumProvider = mapStringToProviderEnum(providerValue as string);
+              if (!actualEnumProvider) return;
+
+              const newModelName = UTILS_updateModelNameAfterProviderChange(actualEnumProvider);
+
+              if (newModelName === undefined) {
+                  console.error(`Could not find a default model for provider: ${actualEnumProvider}`);
+                  return;
+              }
+
+              const updatedModels = localState.currentModels.map((m, i) =>
+                i === index ? { ...m, provider: actualEnumProvider, modelName: newModelName as ModelNames } : m
+              );
+              setLocalState({ ...localState, currentModels: updatedModels });
+            }}
+            modelNameChanged={(name) => {
+              const updatedModels = localState.currentModels.map((m, i) =>
+                i === index ? { ...m, modelName: name as ModelNames } : m
+              );
+              setLocalState({ ...localState, currentModels: updatedModels });
+            }}
+            temperatureChanged={(temp) => {
+              const updatedModels = localState.currentModels.map((m, i) =>
+                i === index ? { ...m, temperature: temp } : m
+              );
+              setLocalState({ ...localState, currentModels: updatedModels });
+            }}
           />
         </div>
       ))}

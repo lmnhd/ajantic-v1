@@ -25,15 +25,19 @@ export async function loadTeam(teamId: number, get: Function, set: Function) {
     }
     const state = get();
     const team = await SERVER_getTeam(teamId);
+    
+    // Update the team data in localState
     set({
       localState: {
         ...state.localState,
         currentAgents: team,
-      },
-      contextSets:
-        mergeOrOverwrite === "merge"
-          ? [...state.contextSets, ...(team.contextSets || [])]
-          : team.contextSets || [],
+        contextSet: {
+          teamName: team.name,
+          sets: mergeOrOverwrite === "merge"
+            ? [...(state.localState.contextSet?.sets || []), ...(team.contextSets || [])]
+            : team.contextSets || []
+        }
+      }
     });
   } else {
     const state = get();
@@ -129,7 +133,7 @@ export async function saveAgentState(get: Function, set: Function) {
 
     SERVER_saveTeam(
       _newState.currentAgents,
-      _newState.contextSets,
+      _newState.contextSet.sets,
       _newState.userId,
       allOrOne as "all" | "one"
     );

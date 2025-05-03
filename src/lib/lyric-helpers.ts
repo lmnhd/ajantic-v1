@@ -1,4 +1,4 @@
-import { LineLyricType } from "@/components/songeditor/lyric/line";
+import { LineLyricType } from "./types";
 import {
   AgentComponentProps,
   AgentVoiceProviderEnum,
@@ -54,7 +54,7 @@ export function getBlockStringWithLabel(aiState: AISessionState) {
     return "";
   }
   return aiState.currentSong[aiState.curBlockNum].text
-    .map((t: LineLyricType) => t.text)
+    .map((t: LineLyricType) => t.content)
     .join("\n");
 }
 export function getBlockStringNoLabel(aiState: AISessionState) {
@@ -90,6 +90,8 @@ export function createNewLine(
     lineNum,
     text,
     type,
+    content: text,
+    id: `${blockNum}-${lineNum}`,
   } as LineLyricType;
 }
 
@@ -201,20 +203,16 @@ export function createNewBlockFromValues(
 ) {
   return createNewBlock(values.values.length, blockName, [
     {
-      type: "label",
-      text: labelName,
-      lineNum: 0,
-      blockNum: 0,
-      blockLength: values.values.length,
+      content: labelName,
+      id: `${0}-${0}`,
+      
     },
     ...values.values
       .filter((line, index) => line.text !== "")
       .map((line, index) => {
         return {
-          type: "line",
-          text: line.text,
-          lineNum: index + 1,
-          blockNum: 0,
+          content: line.text,
+          id: `${0}-${index + 1}`,
           blockLength: values.values.length,
         } as LineLyricType;
       }),
@@ -382,7 +380,7 @@ export function __initAIState() {
       songString: "",
       groupLines: [],
       contextSet: {sets: [] as ContextContainerProps[], teamName: "Default Team"},
-      lineSets: [],
+      //lineSets: [],
       currentModels: [
         {
           provider: ModelProviderEnum.OPENAI,
@@ -530,7 +528,7 @@ export function __initAIState() {
         ],
       },
 
-      contextSets: [],
+      //contextSets: [],
       lineString: "",
       lineStringAfter: "",
       lineStringBefore: "",

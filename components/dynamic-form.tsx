@@ -20,24 +20,35 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { cn, ValueType } from "@/src/lib/utils";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { CalendarIcon } from "lucide-react";
-import { format } from "date-fns";
+import { cn } from "@/src/lib/utils";
 import { EnhancedDatePicker } from "./enhanced-date-picker";
-import { DynamicFormSchemaValue } from "../post-message-analysis/form-creator-core";
+import { DynamicFormSchemaValue, DynamicFormValueType } from "@/src/lib/post-message-analysis/form-creator-core";
+import { ValueType } from "@/src/lib/types";
 
 interface DynamicFormProps {
   schema: DynamicFormSchemaValue[];
   onSubmit: (values: any) => void;
   className?: string;
   isFullscreen?: boolean;
+}
+
+// Mapping function to convert between type systems
+function mapTypeToFormValue(type: string): DynamicFormValueType {
+  const mapping: Record<string, DynamicFormValueType> = {
+    [ValueType.STRING]: "string",
+    [ValueType.NUMBER]: "number",
+    [ValueType.BOOLEAN]: "boolean",
+    [ValueType.OBJECT]: "object",
+    [ValueType.ARRAY]: "array",
+    [ValueType.NULL]: "null",
+    [ValueType.UNDEFINED]: "undefined",
+    [ValueType.DATE]: "date",
+    [ValueType.ENUM]: "enum",
+    [ValueType.FILE]: "file",
+    [ValueType.ENUM_OR_CUSTOM]: "enum_or_custom"
+  };
+  
+  return mapping[type] || "string";
 }
 
 const DynamicForm: React.FC<DynamicFormProps> = ({
@@ -52,9 +63,9 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
   const defaultValues = React.useMemo(() => {
     const values: Record<string, any> = {};
     schema.forEach((field) => {
-      if (field.valueType === ValueType.ENUM) {
+      if (field.valueType === "enum") {
         values[field.key] = field.enumValues?.[0] || "";
-      } else if (field.valueType === ValueType.DATE) {
+      } else if (field.valueType === "date") {
         // For date fields, initialize with undefined instead of empty string
         values[field.key] = undefined;
       } else {
@@ -96,13 +107,13 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
             <FormControl>
               {(() => {
                 switch (field.valueType) {
-                  case ValueType.STRING:
+                  case "string":
                     return <Input {...formField} />;
 
-                  case ValueType.NUMBER:
+                  case "number":
                     return <Input type="number" {...formField} />;
 
-                  case ValueType.BOOLEAN:
+                  case "boolean":
                     return (
                       <Switch
                         checked={formField.value}
@@ -110,7 +121,7 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
                       />
                     );
 
-                  case ValueType.DATE:
+                  case "date":
                     return (
                       <EnhancedDatePicker
                         value={formField.value}
@@ -118,7 +129,7 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
                       />
                     );
 
-                  case ValueType.ENUM:
+                  case "enum":
                     return (
                       <Select
                         onValueChange={formField.onChange}
@@ -137,7 +148,43 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
                       </Select>
                     );
 
-                  case ValueType.FILE:
+                  case "enum_or_custom":
+                    return (
+                      <div className="flex flex-col w-full gap-2">
+                        <Select
+                          onValueChange={(value) => {
+                            if (value === "_custom") {
+                              // Switch to text input mode
+                              formField.onChange("");
+                            } else {
+                              formField.onChange(value);
+                            }
+                          }}
+                          defaultValue={field.enumValues?.includes(formField.value) ? formField.value : "_custom"}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select or enter custom value" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(field.enumValues || []).map((option, i) => (
+                              <SelectItem key={option} value={option}>
+                                {field.enumLabels?.[i] || option}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value="_custom">Enter custom value...</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {(!field.enumValues?.includes(formField.value) || formField.value === "_custom") && (
+                          <Input 
+                            value={formField.value === "_custom" ? "" : formField.value} 
+                            onChange={(e) => formField.onChange(e.target.value)}
+                            placeholder="Enter custom value" 
+                          />
+                        )}
+                      </div>
+                    );
+
+                  case "file":
                     return (
                       <Input
                         type="file"

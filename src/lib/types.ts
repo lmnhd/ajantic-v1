@@ -275,6 +275,16 @@ export type AI_Agent_ToolsDescription = {
   description: string;
 };
 
+// --- ADD INTERFACE DEFINITION HERE ---
+export interface ToolInputParameter {
+    name: string;
+    type: "string" | "number" | "boolean" | "array" | "object"; // Allowed types
+    description: string;
+    required?: boolean; // Optional flag, defaults to true if omitted
+    default?: any; // Optional default value
+}
+// --- END ADD INTERFACE DEFINITION --- 
+
 /**
  * Unified interface for tool requests across the application
  * Combines functionality from both auto-gen and teams-lib implementations
@@ -296,6 +306,7 @@ export interface ToolRequest {
 
   // Optional properties for richer tool generation
   purpose?: string; // Detailed purpose of the tool
+  modificationRequests?: string[];
   examples?: {
     // Example usage
     input: Record<string, any>;
@@ -310,6 +321,7 @@ export interface ToolRequest {
   suggestedOutputs?: string[]; // Simple list of outputs
   category?: string; // Tool category
   toolGroup?: string; // Tool grouping category
+  implementation?: string; // Implementation of the tool
 }
 
 export type MessageRouterProps = {
@@ -529,6 +541,7 @@ export type ModelArgs = {
   temperature: number;
   maxInputTokens?: number;
   maxOutputTokens?: number;
+  topP?: number;
 };
 
 export type ModelProvider = {
@@ -679,9 +692,9 @@ export type ServerMessage = {
 export interface AppFrozenState {
   localState: AISessionState;
   currentConversation: ServerMessage[];
-  contextSet: ContextSet;
+  //contextSet: ContextSet;
   analysisSet?: {
-    contextSet: ContextSet;
+    //contextSet: ContextSet;
     analysisName: string;
     userId: string;
   };
@@ -809,6 +822,7 @@ export enum ValueType {
   DATE = "DATE",
   ENUM = "ENUM",
   FILE = "FILE",
+  ENUM_OR_CUSTOM = "ENUM_OR_CUSTOM",
 }
 
 /**

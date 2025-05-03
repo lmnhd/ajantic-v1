@@ -4,9 +4,9 @@ import {
   ModelProviderEnum,
 } from "@/src/lib/types";
 import { generateText, tool } from "ai";
-import { MODEL_getModel_ai } from "../vercelAI-model-switcher";
+import { MODEL_getModel_ai } from "../../vercelAI-model-switcher";
 import { z } from "zod";
-import { TextChatLogProps } from "../text-chat-log";
+import { TextChatLogProps } from "../../text-chat-log";
 import { logger } from "@/src/lib/logger";
 import { AgentComponentProps } from "@/src/lib/types";
 export const TOOLFUNCTION_CONTEXT_SETS = (

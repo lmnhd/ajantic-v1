@@ -99,8 +99,14 @@ export function mapOrchestrationTypes(
  * Helper function to create the initial orchestration state
  */
 export function createInitialOrchestrationState(config: OrchestrationConfig): OrchestrationState {
+  // Make sure config has the default if undefined
+  const effectiveConfig = {
+      ...config,
+      stopOnError: config.stopOnError !== false // Defaults to true if undefined or null
+  };
+  
   return {
-    config,
+    config: effectiveConfig, // Use the config with default applied
     status: "initializing",
     currentRound: 0,
     currentCycleStep: 0,
@@ -109,7 +115,8 @@ export function createInitialOrchestrationState(config: OrchestrationConfig): Or
     contextSets: config.initialContext || [],
     pauseRequested: false,
     cancelRequested: false,
-    continueFromPauseSignal: false
+    continueFromPauseSignal: false,
+    // resumable fields are initialized later or are null/undefined by default
   };
 }
 
@@ -128,13 +135,14 @@ export function createOrchestrationConfig(
   maxRounds: number = 10,
   numRounds: number = 0,
   customAgentSet: string[] = [],
-  streaming: boolean = false
+  streaming: boolean = false,
+  stopOnError: boolean = true // Default to true
 ): OrchestrationConfig {
   return {
     type: mapOrchestrationTypes(legacyType, agentOrder),
     initialMessage,
     agents,
-    teamName, 
+    teamName,
     objectives,
     userId,
     initialContext,
@@ -142,7 +150,8 @@ export function createOrchestrationConfig(
     numRounds,
     customAgentSet,
     streaming,
-    agentOrder
+    agentOrder,
+    stopOnError // Add the flag here
   };
 }
 
@@ -200,7 +209,7 @@ export async function runOrchestration(
       
       case OrchestrationType2.MANAGER_DIRECTED_WORKFLOW: {
         const { ORCHESTRATION_runManagerDirectedWorkflow } = await import("./modes/manager-directed");
-        return ORCHESTRATION_runManagerDirectedWorkflow(initialState, sessionState);
+        return ORCHESTRATION_runManagerDirectedWorkflow(initialState, sessionState, updateUIState);
       }
       
       default: {

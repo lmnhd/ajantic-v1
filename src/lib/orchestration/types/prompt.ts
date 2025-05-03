@@ -30,6 +30,9 @@ export interface OrchestrationPromptContext {
     // === Dynamic Workflow Specifics (Optional) ===
     // Used primarily by LLM_ROUTED or MANAGER_DIRECTED prompts
     messageSource?: "user" | "agent" | "manager" | "system";
+
+    /** Optional output criteria provided by the manager for this specific task */
+    expectedOutputCriteria?: any;
 } 
 
 // can you double check the 'CurrentConversation" storage routines since we have now updated the serverMessage interface? Will we encounter issues with storing and loading new and legacy messages?

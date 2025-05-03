@@ -10,7 +10,7 @@ import {
   TOOLFUNCTION_iterateAuthToolProcessUntilSuccess,
   AuthToolOptimizerProps,
 } from "@/src/lib/agent-tools/error-iterators/next-auth-tool-err-iter/auth-tool-optimizer";
-import { TOOLFUNCTION_CONTEXT_SETS } from "@/src/lib/agent-tools/context-sets";
+import { TOOLFUNCTION_CONTEXT_SETS } from "@/src/lib/agent-tools/context-sets/context-sets";
 import { AgentComponentProps, ContextContainerProps } from "@/src/lib/types";
 import { S3_storeFileToS3 } from "@/src/lib/agent-tools/s3-storage/s3-core";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";

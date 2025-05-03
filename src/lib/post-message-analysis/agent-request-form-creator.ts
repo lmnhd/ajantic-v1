@@ -33,37 +33,31 @@ export async function ANALYSIS_TOOLS_formCreator(
   logger.log(`Generating form for request...`, {
     messageContainaingRequest,
   });
+  const systemPrompt = `You are a form schema creator. Your primary task is to analyze requests and create form schemas.
+
+CRITICAL INSTRUCTION: For ANY field where options or examples are mentioned in the request (especially in parentheses like "e.g." or "such as"), ALWAYS use valueType: "enum_or_custom".
+
+Field type selection rules in ORDER OF PRIORITY:
+1. enum_or_custom: REQUIRED whenever ANY examples or options are mentioned
+2. enum: Only when options are fixed with no custom input needed
+3. Other types (string, number, date, etc.) ONLY when no options can be inferred
+
+ALWAYS extract ALL potential options mentioned in the message as enumValues.
+
+Examples of CORRECT behavior:
+Request: "What's your favorite color?"
+INCORRECT: { key: "favoriteColor", valueType: "string" }
+CORRECT: { key: "favoriteColor", valueType: "enum_or_custom", enumValues: ["red", "blue", "green", "yellow", "purple", "other"] }
+
+Request: "What type of document is this? (e.g., invoice, receipt, contract)"
+CORRECT: { key: "documentType", valueType: "enum_or_custom", enumValues: ["invoice", "receipt", "contract"] }`;
+
   const result = await generateObject({
-    model: await MODEL_getModel_ai(UTILS_getModelArgsByName(UTILS_getModelsJSON().OpenAI["gpt-4o-mini"].name, 0)),
+    model: await MODEL_getModel_ai(UTILS_getModelArgsByName(UTILS_getModelsJSON().OpenAI["gpt-4.5-preview"].name, 0)),
     messages: [
       {
         role: "system",
-        content: `You are an expert web form designer focused on creating precise, targeted forms. Your task is to analyze the provided message and create a form schema that ONLY collects the specific information explicitly requested or implied by the message.
-
-Key principles:
-1. ONLY include fields that are directly related to the information being requested
-2. Do NOT add any fields that weren't mentioned or implied in the request
-3. Prioritize providing the user with options whenever feasible.
-4. Use appropriate field types based on the following priority:
-   - enum_or_custom: PREFERRED DEFAULT - Always use this when any examples or options are mentioned in the request, especially in parentheses like "(e.g., option1, option2)". Extract all examples as enumValues.
-   - enum: Use when there is a fixed set of options with no need for custom input.
-   - string: Use ONLY when options are impossible to determine.
-   - date: for dates.
-   - number: for numerical values.
-   - boolean: for simple yes/no choices.
-5. ALWAYS SCAN FOR EXAMPLES in the message, particularly text in parentheses with "e.g." or "such as" or "like" - these are potential enum values.
-6. Add clear descriptions to help users understand what information is needed
-7. Group related fields if multiple fields are needed for a single request using the 'group' property
-8. Always generate 'enumValues' and 'enumLabels' when using 'enum' or 'enum_or_custom'.
-
-Example 1 (Request: "What is your name and email?"):
-Fields: [{ key: "name", valueType: "string" }, { key: "email", valueType: "string" }]
-
-Example 2 (Request: "What type of document is this? It could be an invoice, receipt, or maybe a contract."):
-Fields: [{ key: "documentType", valueType: "enum_or_custom", enumValues: ["invoice", "receipt", "contract"], enumLabels: ["Invoice", "Receipt", "Contract"] }]
-
-Example 3 (Request: "Do you have any specific product category in mind? (e.g., health & fitness, wealth, relationships)"):
-Fields: [{ key: "productCategory", valueType: "enum_or_custom", enumValues: ["health_fitness", "wealth", "relationships"], enumLabels: ["Health & Fitness", "Wealth", "Relationships"] }]`,
+        content: systemPrompt,
       },
       {
         role: "user",
@@ -71,47 +65,45 @@ Fields: [{ key: "productCategory", valueType: "enum_or_custom", enumValues: ["he
       },
     ],
     schema: z.object({
-      formSchema: z
-        .array(
-          z.object({
-            key: z.string(),
-            valueType: z.enum([
-              VALUE_TYPES.STRING,
-              VALUE_TYPES.NUMBER,
-              VALUE_TYPES.BOOLEAN,
-              VALUE_TYPES.OBJECT,
-              VALUE_TYPES.ARRAY,
-              VALUE_TYPES.NULL,
-              VALUE_TYPES.UNDEFINED,
-              VALUE_TYPES.DATE,
-              VALUE_TYPES.ENUM,
-              VALUE_TYPES.FILE,
-              VALUE_TYPES.ENUM_OR_CUSTOM,
-            ]),
-            enumValues: z.array(z.string()).optional(),
-            enumLabels: z.array(z.string()).optional(),
-            group: z
-              .string()
-              .optional()
-              .describe(
-                "The group the field belongs to. This is used to group fields in the form."
-              ),
-            fileTypes: z
-              .array(z.string())
-              .optional()
-              .describe("Allowed file types for file upload fields"),
-           
-            description: z
-              .string()
-              .optional()
-              .describe(
-                "A description of the field. This is used to give the user more information about the field."
-              ),
-          })
-        )
-        .describe(
-          "The schema for the form. When feasible, use enums or enums with custom options to give the user specific choices."
-        ),
+      formSchema: z.array(
+        z.object({
+          key: z.string(),
+          valueType: z.enum([
+            VALUE_TYPES.STRING,
+            VALUE_TYPES.NUMBER,
+            VALUE_TYPES.BOOLEAN,
+            VALUE_TYPES.OBJECT,
+            VALUE_TYPES.ARRAY,
+            VALUE_TYPES.NULL,
+            VALUE_TYPES.UNDEFINED,
+            VALUE_TYPES.DATE,
+            VALUE_TYPES.ENUM,
+            VALUE_TYPES.FILE,
+            VALUE_TYPES.ENUM_OR_CUSTOM,
+          ]).describe("ALWAYS use enum_or_custom if any options are mentioned in the request"),
+          enumValues: z.array(z.string()).optional()
+            .describe("REQUIRED for enum_or_custom - extract ALL potential options mentioned"),
+          enumLabels: z.array(z.string()).optional(),
+          group: z
+            .string()
+            .optional()
+            .describe(
+              "The group the field belongs to. This is used to group fields in the form."
+            ),
+          fileTypes: z
+            .array(z.string())
+            .optional()
+            .describe("Allowed file types for file upload fields"),
+          description: z
+            .string()
+            .optional()
+            .describe(
+              "A description of the field. This is used to give the user more information about the field."
+            ),
+        })
+      ).describe(
+        "The schema for the form. When feasible, use enums or enums with custom options to give the user specific choices."
+      ),
       formName: z.string().describe("The name of the form. For the client to identify the form."),
     }),
   });

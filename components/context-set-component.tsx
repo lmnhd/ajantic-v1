@@ -89,35 +89,45 @@ const ContextSetComponent = ({
   handleDeleteTextFromSet,
   themeColor = 'indigo'
 }: ContextSetComponentProps) => {
-  const [gridCols, setGridCols] = React.useState<number>(2);
+  const [gridCols, setGridCols] = useState<number>(2);
   const { toast } = useToast();
   const { appState } = useGlobalStore();
   const {
     localState,
-    updateLocalState,
-    saveState,
+    updateContextSet,
+    addContextContainer,
+    updateContextContainer,
+    deleteContextContainer,
+    toggleAgentVisibility,
+    shiftContextContainer,
+    clearContextText,
     handleSaveContextSet,
     handleLoadContextSet,
     handleDeleteContextSet,
     handleDeleteMultipleContextSets
   } = useAnalysisStore(state => ({
     localState: state.localState,
-    updateLocalState: state.updateLocalState,
-    saveState: state.saveState,
+    updateContextSet: state.updateContextSet,
+    addContextContainer: state.addContextContainer,
+    updateContextContainer: state.updateContextContainer,
+    deleteContextContainer: state.deleteContextContainer,
+    toggleAgentVisibility: state.toggleAgentVisibility,
+    shiftContextContainer: state.shiftContextContainer,
+    clearContextText: state.clearContextText,
     handleSaveContextSet: state.handleSaveContextSet,
     handleLoadContextSet: state.handleLoadContextSet,
     handleDeleteContextSet: state.handleDeleteContextSet,
     handleDeleteMultipleContextSets: state.handleDeleteMultipleContextSets
   }));
 
-  const [isFullScreen, setIsFullScreen] = React.useState(false);
-  const [selectedSetId, setSelectedSetId] = React.useState<string>("");
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [selectedSetId, setSelectedSetId] = useState<string>("");
   const [savedAnalysisStatesLoaded, setSavedAnalysisStatesLoaded] =
-    React.useState<boolean>(false);
+    useState<boolean>(false);
   const [isAnyContainerFullscreen, setIsAnyContainerFullscreen] =
     useState(false);
-  const [selectedSets, setSelectedSets] = React.useState<number[]>([]);
-  const [isManageDialogOpen, setIsManageDialogOpen] = React.useState(false);
+  const [selectedSets, setSelectedSets] = useState<number[]>([]);
+  const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
 
   React.useEffect(() => {
     const loadSavedSets = async () => {
@@ -180,7 +190,7 @@ const ContextSetComponent = ({
         type: "foreground",
       });
 
-      await saveState();
+      await updateContextSet({ sets: formattedSets });
     } catch (error) {
       console.error("Error saving analysis set:", error);
       toast({
@@ -192,40 +202,22 @@ const ContextSetComponent = ({
   };
 
   const shiftSetUpOrDown = (index: number, direction: "up" | "down") => {
-    if (!inputContextSet) return;
-    const currentSets = inputContextSet.sets;
-    if (direction === "up" && index === 0) return;
-    if (direction === "down" && index === currentSets.length - 1) return;
-
-    const nextSets = [...currentSets];
-    const [movedSet] = nextSets.splice(index, 1);
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    nextSets.splice(targetIndex, 0, movedSet);
-
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    shiftContextContainer(index, direction);
   };
 
   const deletTextFromSetCalled = (index: number) => {
-    if (!inputContextSet) return;
-    console.log("deletTextFromSetCalled");
-    const nextSets = inputContextSet.sets.map((set, i) =>
-      i === index ? { ...set, text: "" } : set
-    );
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
-    handleDeleteTextFromSet?.(index.toString());
+    clearContextText(index);
   };
 
   const convertLinesToText = (index: number) => {
-    if (!inputContextSet) return;
-    console.log("converting lines to text", index);
-    const nextSets = inputContextSet.sets.map((set, i) => {
-      if (i === index && Array.isArray(set.lines)) {
-        const newText = set.lines.map((line: LineLyricType) => line.content).join("\n");
-        return { ...set, text: newText, lines: [] };
-      }
-      return set;
-    });
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    const sets = localState.contextSet?.sets;
+    if (!sets || !sets[index]) return;
+    
+    const set = sets[index];
+    if (!Array.isArray(set.lines)) return;
+    
+    const newText = set.lines.map((line: LineLyricType) => line.content).join("\n");
+    updateContextContainer(index, { text: newText, lines: [] });
   };
 
   const toggleHideFromAgents = (
@@ -234,87 +226,43 @@ const ContextSetComponent = ({
     allAgentNames: string[],
     soloInstead?: boolean
   ) => {
-    if (!inputContextSet) return;
-    let nextSets;
-    if (soloInstead) {
-      console.log("SOLO_INSTEAD", agentName, selectedIndex);
-      nextSets = inputContextSet.sets.map((set, index) => {
-        if (index === selectedIndex) {
-          return { ...set, hiddenFromAgents: allAgentNames.filter(a => a !== agentName) };
-        }
-        return set;
-      });
-    } else {
-      nextSets = inputContextSet.sets.map((set, index) => {
-        if (index === selectedIndex) {
-          const currentHidden = set.hiddenFromAgents ?? [];
-          const isHidden = currentHidden.includes(agentName);
-          const nextHidden = isHidden
-            ? currentHidden.filter((a) => a !== agentName)
-            : [...currentHidden, agentName];
-          return { ...set, hiddenFromAgents: nextHidden };
-        }
-        return set;
-      });
-    }
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    toggleAgentVisibility(agentName, selectedIndex, allAgentNames, soloInstead);
   };
 
   const editText = (text: string, index: number) => {
-    if (!inputContextSet) return;
-    console.log("editing text", text);
-    const nextSets = inputContextSet.sets.map((set, i) =>
-      i === index ? { ...set, text: text } : set
-    );
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    updateContextContainer(index, { text });
   };
 
   const deleteLineOrTextFromLyricSet = (lineIndex: number) => {
-    if (!inputContextSet) return;
+    if (!localState.contextSet?.sets || currentContextSetItem < 0) return;
     console.log("Clearing text/lines for current item:", currentContextSetItem);
-    const nextSets = inputContextSet.sets.map((set, i) => {
-       if (i === currentContextSetItem) {
-         return { ...set, text: "", lines: [], setName: set.setName || `Set ${i + 1}` };
-       }
-       return set;
+    
+    updateContextContainer(currentContextSetItem, { 
+      text: "", 
+      lines: [], 
+      setName: localState.contextSet.sets[currentContextSetItem].setName || `Set ${currentContextSetItem + 1}` 
     });
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
   };
 
   const deleteSingleLineFromSet = (setIndex: number, lineIndex: number) => {
-    if (!inputContextSet) return;
+    if (!localState.contextSet?.sets) return;
     console.log("deleting single line from set", setIndex, lineIndex);
-    const nextSets = inputContextSet.sets.map((set, i) => {
-      if (i === setIndex && Array.isArray(set.lines)) {
-         const nextLines = [...set.lines];
-         nextLines.splice(lineIndex, 1);
-         return { ...set, lines: nextLines };
-      }
-      return set;
-    });
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    
+    const set = localState.contextSet.sets[setIndex];
+    if (!set || !Array.isArray(set.lines)) return;
+    
+    const nextLines = [...set.lines];
+    nextLines.splice(lineIndex, 1);
+    updateContextContainer(setIndex, { lines: nextLines });
   };
 
   const addSetToContainer = () => {
-    if (!inputContextSet) return;
-    const nextSets = [
-      ...(inputContextSet.sets ?? []),
-      {
-      lines: [],
-      text: "",
-        setName: `Set ${(inputContextSet.sets?.length ?? 0) + 1}`,
-      isDisabled: false,
-      hiddenFromAgents: [],
-      }
-    ];
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    addContextContainer();
   };
 
   const deleteSetFromContainer = (index: number) => {
-    if (!inputContextSet) return;
-    const nextSets = [...inputContextSet.sets];
-    nextSets.splice(index, 1);
-    updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
+    console.log("deleteSetFromContainer called with index:", index);
+    deleteContextContainer(index);
   };
 
   const handleLoadSavedState = async (id: string) => {
@@ -337,10 +285,8 @@ const ContextSetComponent = ({
   };
 
   const clearSets = () => {
-    if (!inputContextSet) return;
-    const reset = confirm("Are you sure you want to reset the line sets?");
-    if (reset) {
-      updateLocalState({ contextSet: { ...inputContextSet, sets: [] } });
+    if (confirm("Are you sure you want to reset the line sets?")) {
+      updateContextSet({ sets: [] });
     }
   };
 
@@ -365,15 +311,8 @@ const ContextSetComponent = ({
   }, [gridCols]);
 
   const handleSetLabelName = useCallback((newName: string, index: number) => {
-    if (!inputContextSet) return;
-    const currentSet = inputContextSet.sets[index];
-    if (currentSet && currentSet.setName !== newName) {
-      const nextSets = inputContextSet.sets.map((set, i) =>
-         i === index ? { ...set, setName: newName } : set
-      );
-      updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
-    }
-  }, [inputContextSet, updateLocalState]);
+    updateContextContainer(index, { setName: newName });
+  }, [updateContextContainer]);
 
   const handleDeleteSelected = async () => {
     if (selectedSets.length === 0) return;
@@ -629,15 +568,8 @@ const ContextSetComponent = ({
                     setCurrentContextItem={setCurrentContextSetItem}
                     deleteSingleLineFromSet={deleteSingleLineFromSet}
                     setIsDisabled={(v: any) => {
-                      if (!inputContextSet) return;
-                      const currentSet = inputContextSet.sets[i];
-                      if (currentSet?.isDisabled !== v) {
-                         const nextSets = inputContextSet.sets.map((s, idx) =>
-                            idx === i ? { ...s, isDisabled: v } : s
-                         );
-                         updateLocalState({ contextSet: { ...inputContextSet, sets: nextSets } });
-                         setCurrentContextSetItem(i);
-                      }
+                      updateContextContainer(i, { isDisabled: v });
+                      setCurrentContextSetItem(i);
                     }}
                     formSchema={set.formSchema}
                     onFormSubmit={set.onFormSubmit}

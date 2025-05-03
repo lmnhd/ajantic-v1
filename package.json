@@ -38,7 +38,7 @@
     "@langchain/mistralai": "^0.0.29",
     "@langchain/openai": "^0.1.1",
     "@langchain/pinecone": "^0.0.8",
-    "@mendable/firecrawl-js": "^1.6.1",
+    "@mendable/firecrawl-js": "^1.24.0",
     "@mozilla/readability": "^0.5.0",
     "@neondatabase/serverless": "^0.10.4",
     "@openai/realtime-api-beta": "github:openai/openai-realtime-api-beta",

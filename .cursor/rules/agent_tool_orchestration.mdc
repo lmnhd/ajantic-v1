@@ -1,0 +1,43 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Agent Tool Usage and Orchestration Patterns
+
+This rule outlines key patterns and considerations for agent tool usage, particularly regarding web scraping and managing LLM token limits within the orchestration framework.
+
+## URL Scraping Tools
+
+The primary logic for URL scraping resides in:
+- **Core Implementation:** [`src/lib/agent-tools/url-scrape/url-scrape_core.ts`](mdc:ajantic-v1/src/lib/agent-tools/url-scrape/url-scrape_core.ts)
+- **Tool Definitions:** [`src/lib/agent-tools/url-scrape/url-scrape.ts`](mdc:ajantic-v1/src/lib/agent-tools/url-scrape/url-scrape.ts)
+
+**Available Tools & Strategy:**
+- `scrapeAndSummarizeUrl`: Get a general summary of a single page. Uses Cheerio pre-processing to reduce input to the summarization LLM.
+- `scrapeAndQueryUrl`: **Preferred for specific info.** Scrapes a single page, chunks content, uses an in-memory vector store and embeddings (`UTILS_getEmbeddings` from [`src/lib/utils.ts`](mdc:ajantic-v1/src/lib/utils.ts)) to find relevant chunks based on a query. Should be called with a **focused query** and **low `topK` (1-2 recommended)**. Returns potentially truncated results (`MAX_RETURN_LENGTH` in core file).
+- `scrapeUrl`: Returns raw markdown (less preferred).
+- `crawlUrl`: Gets linked URLs, not content.
+
+**Usage Limit:** To prevent token limit errors caused by accumulating large outputs, data-intensive scrape tools (`scrapeAndSummarizeUrl`, `scrapeAndQueryUrl`, `scrapeUrl`) implement a flag in [`url-scrape.ts`](mdc:ajantic-v1/src/lib/agent-tools/url-scrape/url-scrape.ts) allowing only **one** of these tools to execute successfully per agent turn's tool processing phase.
+
+## Agent Iteration: "The Task Loop"
+
+**Concept:** To handle tasks requiring multiple sequential tool calls (like researching several URLs) without exceeding token limits, we use the "Task Loop" pattern.
+1.  **Agent Planning:** When an agent (like `Research Assistant AI`) receives a multi-step task, its prompt (e.g., in [`src/lib/prompts/agent-global.ts`](mdc:ajantic-v1/src/lib/prompts/agent-global.ts) or [`src/lib/orchestration/prompt/orchestration-prompt.ts`](mdc:ajantic-v1/src/lib/orchestration/prompt/orchestration-prompt.ts)) instructs it to *plan* the sub-tasks (e.g., one `scrapeAndQueryUrl` per URL) and return a structured message (`INITIATE_TASK_LOOP`) instead of executing tools immediately.
+2.  **Orchestrator Control:** The orchestration layer (likely modifying logic around [`src/lib/orchestration/utils/agent-execution.ts`](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts)) detects this, stores the sub-task list and state.
+3.  **Iterative Execution:** The orchestrator calls the agent repeatedly, feeding it **one sub-task at a time**. The agent executes the single required tool call for that sub-task.
+4.  **Result Accumulation:** The orchestrator collects the result from each sub-task.
+5.  **Final Synthesis:** Once all sub-tasks are done, the orchestrator calls the agent a final time with the accumulated results and the original goal, asking it to synthesize the final report.
+
+**Goal:** This enforces step-by-step execution, keeping individual LLM call inputs small and avoiding rate limit errors caused by processing large, combined tool outputs.
+
+## Token Limit Mitigation
+
+Anthropic input token rate limits (20k tokens/minute) are a known issue, often triggered after processing multiple tool results. Key mitigation strategies implemented or discussed include:
+- **Tool Output Truncation:** Limiting the character count returned by tools like `scrapeAndQueryUrl`.
+- **Once-Per-Turn Tool Limit:** The flag pattern described above for scraping tools.
+- **Iterative Processing:** The "Task Loop" pattern.
+- **Prompt Optimization:** Guiding agents (via prompts) to request specific information (`query`, low `topK`) and work iteratively.
+- **Observability:** Added logging to [`agent-execution.ts`](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts) (variable `totalApproxInputChars`) and tool core files to monitor input sizes and tool usage.
+

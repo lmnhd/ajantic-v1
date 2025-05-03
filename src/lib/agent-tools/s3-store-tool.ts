@@ -2,7 +2,7 @@ import { tool } from "ai";
 
 import { z } from "zod";
 import { logger } from "@/src/lib/logger";
-import { TOOLFUNCTION_CONTEXT_SETS } from "./context-sets";
+import { TOOLFUNCTION_CONTEXT_SETS } from "./context-sets/context-sets";
 import { AgentComponentProps, ContextContainerProps } from "@/src/lib/types";
 import { S3_storeFileToS3 } from "@/src/lib/agent-tools/s3-storage/s3-core";
 export const AGENT_TOOLS_s3Store = (contextSets: ContextContainerProps[], currentAgent: AgentComponentProps) => {

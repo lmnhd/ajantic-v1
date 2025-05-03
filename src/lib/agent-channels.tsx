@@ -51,7 +51,7 @@ import { AGENT_TOOLS_agentDiary } from "./agent-tools/agent-diary";
 // import { FirecrawlClient } from "@agentic/firecrawl";
 // import { ExaClient } from "@agentic/exa";
 
-import { AGENT_TOOLS_contextSets } from "@/src/lib/agent-tools/context-sets";
+import { AGENT_TOOLS_contextSets } from "@/src/lib/agent-tools/context-sets/context-sets";
 import {
   AGENT_TOOLS_agentToAgent,
   AGENT_TOOLS_agentToAgent_v2,
@@ -79,11 +79,13 @@ import { AGENT_WORKFLOW_ORCHESTRATION_PROMPT } from "@/src/lib/prompts/workflow-
 import { AGENT_TOOLS_loadCustomTools } from "@/src/lib/agent-tools/auto-gen-tool/load-custom-tools";
 import { CustomToolDefinition } from "@/src/lib/agent-tools/auto-gen-tool/tool-generator";
 
-import { AGENT_TOOLS_knowledgeBase_query, AGENT_TOOLS_pinecone } from "@/src/lib/agent-tools/pinecone";
+import { AGENT_TOOLS_knowledgeBase_query, AGENT_TOOLS_pinecone } from "@/src/lib/agent-tools/pinecone-db/pinecone";
 import { AGENT_TOOLS_perplexity2 } from "@/src/lib/agent-tools/perplexity2";
 import { AGENT_TOOLS_s3Store } from "@/src/lib/agent-tools/s3-store-tool";
 import { AGENT_TOOLS_database } from "@/src/lib/agent-tools/database-tool/database-tool";
 import { OrchestrationType2 } from "./orchestration/types";
+import { ORCHESTRATION_load_agent_tools } from "@/src/lib/orchestration/utils/load-agent-tools";
+import { OrchestrationConfig } from "@/src/lib/orchestration/types";
 
 //let _data: any;
 
@@ -152,7 +154,7 @@ export async function agentToAgentChat(
       skillSet: recipient.systemPrompt || "",
       role: recipient.roleDescription || "",
       tools: recipient.tools || [],
-      customTools: recipient.customTools,
+      customTools: {},
       directives: recipient.promptDirectives || [],
       context: UTILS_convertLineSetsToContext(contextSets, recipient.name),
       mission: state.currentAgents.objectives,
@@ -204,47 +206,28 @@ export async function agentToAgentChat(
   });
   //const currentConversation = [...history, ...convoTwo.history, formattedUserMessage];
 
-  const _tools = {
-    ...(await LOAD_TYPE_SPECIFIC_TOOLS(
-      recipient.type as AgentTypeEnum,
-      {},
-      contextSets,
-      convoTwo,
-      convoThree,
-      {
-        agentType: recipient.type as AgentTypeEnum,
-        thisAgentName: recipient.name || "",
-        teamName: teamName,
-        userId: userId,
-        userName: state.genericData.userName || "",
-        skillSet: recipient.systemPrompt || "",
-        role: recipient.roleDescription || "",
-        tools: recipient.tools || [],
-        customTools: recipient.customTools,
-        directives: recipient.promptDirectives || [],
-        context: UTILS_convertLineSetsToContext(contextSets, recipient.name),
-        mission: state.currentAgents.objectives,
-        peerAgents: state.currentAgents.agents.filter(
-          (_agent) => _agent.name !== recipient.name && !_agent.disabled
-        ),
-        trainingMode: recipient.training || false,
-      },
-      state,
-      {
-        conversationLevel,
-        messageHistory: currentConversation,
-        updateMessages: [],
-        messageGoRound: false,
-        userId,
-        teamName,
-        message,
-      },
-      vectorStore,
-      textChatLogs,
-      recipient.hasKnowledgeBase || false,
-      recipient.allowedContacts || []
-    )),
-  };
+   // Construct necessary parts for orchestrationConfig
+   const orchestrationConfig: OrchestrationConfig = {
+    agents: state.currentAgents.agents,
+    userId: userId,
+    teamName: teamName,
+    type: orchestrationProps?.chatMode || OrchestrationType2.DIRECT_AGENT_INTERACTION,
+    currentAgentName: agentName,
+    initialMessage: message,
+    objectives: state.currentAgents.objectives,
+};
+
+  // Call the unified tool loader
+  const _tools = await ORCHESTRATION_load_agent_tools(
+    recipient,
+    orchestrationConfig,
+    contextSets,
+    currentConversation,
+    vectorStore,
+    textChatLogs || [],
+    state.currentAgents.objectives,
+    state
+);
 
   logger.tool("Loading agent tools and capabilities", {
     agent: recipient.name,
@@ -460,7 +443,7 @@ export const agentChannelMessageRouter = async (
               skillSet: agent.systemPrompt || "",
               role: agent.roleDescription || "",
               tools: agent.tools || [],
-              customTools: agent.customTools,
+              customTools: {},
               directives: agent.promptDirectives || [],
               context: UTILS_convertLineSetsToContext(contextSets, agent.name),
               mission: state.currentAgents.objectives,
@@ -668,8 +651,8 @@ export async function basicAgentChat(
   // Add rate limiting delay
   await waitForRateLimit();
 
-  // Truncate helper function - keep for prompt truncation
-  const truncateMessage = (msg: string) => {
+  // Truncate helper function
+  const truncateMessage: (msg: string) => string = (msg: string) => {
     const MAX_LENGTH = 12000;
     return msg.length > MAX_LENGTH ? msg.slice(0, MAX_LENGTH) + '...' : msg;
   };
@@ -733,9 +716,7 @@ export async function basicAgentChat(
     const formattedUserMessage: ServerMessage = {
       role: "user",
       content: message,
-      agentName:
-        agentFoundationalPromptProps?.thisAgentName ||
-        orchestrationProps?.currentAgent?.name,
+      agentName: agent.name,
       currentState: "",
       conversationLevel: conversationLevel,
     };
@@ -781,7 +762,6 @@ export async function basicAgentChat(
       action: "PROMPT_PREPARE",
       agent: agent.name,
       type: agent.type,
-
       context: message,
     });
 
@@ -807,54 +787,39 @@ export async function basicAgentChat(
       });
     }
 
-    const _tools = {
-      ...(await LOAD_TYPE_SPECIFIC_TOOLS(
-        agent.type as AgentTypeEnum,
-        {},
-        contextSets,
-        convoTwo,
-        convoThree,
-        {
-          agentType: agent.type as AgentTypeEnum,
-          thisAgentName: agent.name || "",
-          teamName: teamName,
-          userId: userId,
-          userName: state.genericData.userName || "",
-          skillSet: agent.systemPrompt || "",
-          role: agent.roleDescription || "",
-          tools: agent.tools || [],
-          customTools: agent.customTools,
-          directives: agent.promptDirectives || [],
-          context: UTILS_convertLineSetsToContext(contextSets, agent.name),
-          mission: state.currentAgents.objectives,
-          peerAgents: state.currentAgents.agents.filter(
-            (_agent) => _agent.name !== agent.name && !_agent.disabled
-          ),
-          trainingMode: agent.training || false,
-        },
-        state,
-        {
-          conversationLevel,
-          messageHistory: currentConversation,
-          updateMessages: [],
-          messageGoRound: false,
-          userId,
-          teamName,
-          message,
-        },
-        vectorStore,
-        textChatLogs,
-        agent.hasKnowledgeBase || false,
-        agent.allowedContacts || []
-      )),
+    // Construct necessary parts for orchestrationConfig
+    const orchestrationConfig: OrchestrationConfig = {
+        agents: agentsByName.agents,
+        userId: userId,
+        teamName: teamName,
+        type: orchestrationProps?.chatMode || OrchestrationType2.DIRECT_AGENT_INTERACTION,
+        currentAgentName: agent.name,
+        initialMessage: message,
+        objectives: state.currentAgents.objectives,
     };
 
-    console.log(`Tools for ${agent.name}:`, await UTILS_getObjectKeysOfLoadedTools(_tools));
+    // Call the unified tool loader
+    const _tools = await ORCHESTRATION_load_agent_tools(
+        agent,
+        orchestrationConfig,
+        contextSets,
+        currentConversation,
+        vectorStore,
+        textChatLogs || [],
+        state.currentAgents.objectives,
+        state
+    );
 
-    logger.tool(`Tools for ${agent.name}:`, {
-      tools: await UTILS_getObjectKeysOfLoadedTools(_tools),
+    // Log the keys of the loaded tools
+    const loadedToolKeys = await UTILS_getObjectKeysOfLoadedTools(_tools);
+    logger.tool(`Tools loaded for ${agent.name} via ORCHESTRATION_load_agent_tools:`, {
+      agentName: agent.name,
+      toolCount: loadedToolKeys.length,
+      toolKeys: loadedToolKeys
     });
+    console.log(`Tools loaded for ${agent.name}:`, loadedToolKeys);
 
+    // Provider options logic remains the same
     let _providerOptions = {};
     if (agent.modelArgs.modelName === "claude-3-7-sonnet-20250219") {
       _providerOptions = {
@@ -869,16 +834,9 @@ export async function basicAgentChat(
       });
     }
 
-    // Update capturedVariables with actual values
+    // Update capturedVariables with actual values (now includes the correctly loaded _tools)
     capturedVariables = {
-      agent,
-      currentConversation,
-      truncatedPrompt,
-      _prompt,
-      convoTwo,
-      conversationLevel,
-      _tools,
-      _providerOptions
+      agent, currentConversation, truncatedPrompt, _prompt, convoTwo, conversationLevel, _tools, _providerOptions
     };
 
     const response = await generateText({
@@ -889,10 +847,7 @@ export async function basicAgentChat(
         agent.modelArgs.modelName === "o1-preview"
           ? (currentConversation as CoreMessage[])
           : [
-              {
-                role: "system",
-                content: truncatedPrompt,
-              },
+              { role: "system", content: truncatedPrompt, },
               ...(currentConversation as CoreMessage[]),
             ],
       maxSteps: 6,
@@ -909,423 +864,93 @@ export async function basicAgentChat(
     console.log("END_BASIC_AGENT_CHAT: ", response.text);
     textChatLogs?.push({
       role: "system",
-      message: `END_BASIC_AGENT_CHAT: Final Response from: ${
-        agentFoundationalPromptProps?.thisAgentName ||
-        orchestrationProps?.currentAgent?.name
-      } ${response.text}`,
-      agentName:
-        agentFoundationalPromptProps?.thisAgentName ||
-        orchestrationProps?.currentAgent?.name,
+      message: `END_BASIC_AGENT_CHAT: Final Response from: ${agent.name} ${response.text}`,
+      agentName: agent.name,
     });
-
-    // Format the response message
 
     const formattedResponseMessage: ServerMessage = {
       role: "assistant",
       content: response.text,
-      agentName:
-        agentFoundationalPromptProps?.thisAgentName ||
-        orchestrationProps?.currentAgent?.name,
-      subMessages: convoTwo.history,
+      agentName: agent.name,
+      subMessages: [],
       currentState: JSON.stringify({ ...state, contextSets }),
       conversationLevel: conversationLevel,
     };
-
-    // logger.user("FORMATTED_RESPONSE_MESSAGE", {
-    //   formattedResponseMessage: formattedResponseMessage,
-    // });
 
     return {
       response: response.text,
       history: [...currentConversation, formattedResponseMessage],
       context: contextSets,
+      agentProps: agentFoundationalPromptProps,
       nextAction: "none",
       prompt: _prompt,
-      
-      } as AgentUserResponse
-    
+      textChatLogs: textChatLogs || [],
+    } as AgentUserResponse;
+
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes("Overloaded")) {
-        logger.warn("Model overloaded, implementing exponential backoff retry", {
-          action: "RETRY_AFTER_OVERLOAD",
-          agent: (agentFoundationalPromptProps as AgentFoundationalPromptProps)
-            .thisAgentName,
-        });
-        
-        // Implement exponential backoff
-        const maxRetries = 3;
-        let retryCount = 0;
-        let lastError = error;
-        
-        while (retryCount < maxRetries) {
-          try {
-            // Wait with exponential backoff
-            await new Promise((resolve) => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
-            
-            // Retry the generateText call
-            const response = await generateText({
-              model: await MODEL_getModel_ai(capturedVariables.agent.modelArgs),
-              messages:
-                capturedVariables.agent.modelArgs.modelName === "o1-mini" ||
-                capturedVariables.agent.modelArgs.modelName === "o3-mini" ||
-                capturedVariables.agent.modelArgs.modelName === "o1-preview"
-                  ? (capturedVariables.currentConversation as CoreMessage[])
-                  : [
-                      {
-                        role: "system",
-                        content: capturedVariables.truncatedPrompt,
-                      },
-                      ...(capturedVariables.currentConversation as CoreMessage[]),
-                    ],
-              maxSteps: 6,
-              maxRetries: 1,
-              tools: capturedVariables._tools,
-              providerOptions: capturedVariables._providerOptions,
+    if (error instanceof Error && error.message.includes("Overloaded")) {
+      logger.warn("Model overloaded, implementing exponential backoff retry", {
+        action: "RETRY_AFTER_OVERLOAD",
+        agent: capturedVariables.agent.name,
+      });
+      
+      const maxRetries = 3;
+      let retryCount = 0;
+      let lastError = error;
+      
+      while (retryCount < maxRetries) {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+          const retryResponse = await generateText({
+            model: await MODEL_getModel_ai(capturedVariables.agent.modelArgs),
+            messages:
+              capturedVariables.agent.modelArgs.modelName === "o1-mini" ||
+              capturedVariables.agent.modelArgs.modelName === "o3-mini" ||
+              capturedVariables.agent.modelArgs.modelName === "o1-preview"
+                ? (capturedVariables.currentConversation as CoreMessage[])
+                : [
+                    { role: "system", content: capturedVariables.truncatedPrompt },
+                    ...(capturedVariables.currentConversation as CoreMessage[]),
+                  ],
+            maxSteps: 6,
+            maxRetries: 1,
+            tools: capturedVariables._tools,
+            providerOptions: capturedVariables._providerOptions,
+          });
+          
+          return {
+            response: retryResponse.text,
+            history: [...capturedVariables.currentConversation, {
+              role: "assistant", content: retryResponse.text, agentName: capturedVariables.agent.name,
+              subMessages: [],
+              currentState: JSON.stringify({ ...state, contextSets }),
+              conversationLevel: capturedVariables.conversationLevel,
+            }],
+            context: contextSets,
+            agentProps: agentFoundationalPromptProps,
+            nextAction: "none",
+            prompt: capturedVariables._prompt,
+            textChatLogs: textChatLogs || [],
+          } as AgentUserResponse;
+        } catch (retryError) {
+          lastError = retryError as Error;
+          retryCount++;
+          if (retryCount === maxRetries) {
+            logger.error("Max retries reached after overload", {
+              action: "MAX_RETRIES_REACHED",
+              agent: capturedVariables.agent.name,
+              error: lastError.message,
             });
-            
-            return {
-              response: response.text,
-              history: [...capturedVariables.currentConversation, {
-                role: "assistant",
-                content: response.text,
-                agentName: agentFoundationalPromptProps?.thisAgentName || orchestrationProps?.currentAgent?.name,
-                subMessages: capturedVariables.convoTwo.history,
-                currentState: JSON.stringify({ ...state, contextSets }),
-                conversationLevel: capturedVariables.conversationLevel,
-              }],
-              context: contextSets,
-              nextAction: "none",
-              prompt: capturedVariables._prompt,
-            } as AgentUserResponse;
-          } catch (retryError) {
-            lastError = retryError as Error;
-            retryCount++;
-            if (retryCount === maxRetries) {
-              logger.error("Max retries reached after overload", {
-                action: "MAX_RETRIES_REACHED",
-                agent: (agentFoundationalPromptProps as AgentFoundationalPromptProps)
-                  .thisAgentName,
-                error: lastError.message,
-              });
-              throw lastError;
-            }
+            throw lastError;
+          } else {
+             logger.warn(`Retry ${retryCount}/${maxRetries} after overload...`, { agent: capturedVariables.agent.name });
           }
         }
       }
     }
+    logger.error("Error in basicAgentChat", { error: error instanceof Error ? error.message : String(error), agent: capturedVariables.agent.name || 'Unknown' });
     throw error;
   }
-}
-
-// DEPRECATED. Now using ORCHESTRATION_load_tools
-
-export async function LOAD_TYPE_SPECIFIC_TOOLS(
-  type: AgentTypeEnum,
-  tools: any,
-  contextSets: ContextContainerProps[],
-  convoTwo: SubConversationProps,
-  convoThree: SubConversationProps,
-  agentFoundationalPromptProps: AgentFoundationalPromptProps,
-  state: AISessionState,
-
-  agentChatProps: {
-    conversationLevel: number;
-    messageHistory: ServerMessage[];
-    updateMessages: ServerMessage[];
-    messageGoRound: boolean;
-    userId: string;
-    teamName: string;
-    message: string;
-  },
-  vectorStore: MemoryVectorStore,
-  textChatLogs?: TextChatLogProps[],
-  hasKnowledgeBase?: boolean,
-  allowedContacts?: string[],
-  orchestrationProps?: OrchestrationProps
-) {
-  let _result = {};
-  const currentAgent = state.currentAgents.agents.find(agent => agent.name === agentFoundationalPromptProps.thisAgentName) ;
-  if (!currentAgent) {
-    throw new Error(`Current agent not found: ${agentFoundationalPromptProps.thisAgentName}`);
-  }
-  const allAgents = state.currentAgents.agents.map(agent => agent.name);
-
-  logger.debug("LOAD_TS_TOOLS_AGENT_TYPE", { type });
-  textChatLogs?.push({
-    role: "system",
-    message: `LOAD_TS_TOOLS_AGENT_TYPE: ${type}`,
-    agentName: agentFoundationalPromptProps.thisAgentName,
-  });
-
-  if (allowedContacts && allowedContacts.length > 0) {
-    _result = {
-      ..._result,
-      ...(await AGENT_TOOLS_agentToAgent_v2(
-        allowedContacts,
-        agentChatProps?.conversationLevel || 0,
-        agentFoundationalPromptProps,
-        agentChatProps?.messageHistory || [],
-        state,
-        agentChatProps?.userId || "",
-        agentChatProps?.teamName || "",
-        vectorStore,
-        contextSets,
-        textChatLogs || [],
-        convoTwo,
-        convoThree
-      )),
-    };
-  }
-
-  switch (type) {
-    case AgentTypeEnum.RESEARCHER:
-      _result = {
-        ..._result,
-        ...tools,
-        ...AGENT_TOOLS_perplexity2(),
-        ...AGENT_TOOLS_urlScrape(textChatLogs || []),
-        ...AGENT_TOOLS_contextSets(contextSets, textChatLogs || [], currentAgent, allAgents),
-        ...AGENT_TOOLS_pinecone(textChatLogs || []),
-        ...AGENT_TOOLS_database(contextSets, agentFoundationalPromptProps.userId || "", agentFoundationalPromptProps.thisAgentName, agentFoundationalPromptProps.peerAgents),
-        ...AGENT_TOOLS_s3Store(contextSets, currentAgent),
-      };
-      break;
-    case AgentTypeEnum.CONTEXT_MANAGER:
-      _result = {
-        ...tools,
-        ...AGENT_TOOLS_contextSets(contextSets, textChatLogs || [], currentAgent, allAgents),
-      };
-      break;
-    case AgentTypeEnum.RECORDS:
-      _result = {
-        ..._result,
-        ...tools,
-        ...(await AGENT_TOOLS_agentDiary(
-          agentFoundationalPromptProps.thisAgentName,
-          agentFoundationalPromptProps.teamName || "",
-          agentFoundationalPromptProps.userId || "",
-          textChatLogs || []
-        )),
-      };
-      break;
-    case AgentTypeEnum.MANAGER:
-      if (orchestrationProps && orchestrationProps?.chatMode === OrchestrationType2.LLM_ROUTED_WORKFLOW || orchestrationProps?.chatMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW) {
-        _result = {
-          ..._result,
-          ...AGENT_TOOLS_pinecone(textChatLogs || []),
-          ...AGENT_TOOLS_database(contextSets, agentFoundationalPromptProps.userId || "", agentFoundationalPromptProps.thisAgentName, agentFoundationalPromptProps.peerAgents),
-          ...AGENT_TOOLS_contextSets(contextSets, textChatLogs || [], currentAgent, allAgents),
-        };
-        break;
-      }
-      if (
-        agentFoundationalPromptProps.peerAgents.some(
-          (agent) => agent.type === AgentTypeEnum.CONTEXT_MANAGER
-        )
-      ) {
-        _result = {
-          ..._result,
-          ...(await AGENT_TOOLS_agentToAgent(
-            agentChatProps?.conversationLevel || 0,
-            agentFoundationalPromptProps,
-            agentChatProps?.messageHistory || [],
-            state,
-            convoTwo,
-            convoThree,
-            agentChatProps?.userId || "",
-            agentChatProps?.teamName || "",
-            agentChatProps?.messageGoRound || false,
-            contextSets,
-            vectorStore,
-            textChatLogs || []
-          )),
-        };
-      } else {
-        _result = {
-          ..._result,
-          ...(await AGENT_TOOLS_agentToAgent(
-            agentChatProps?.conversationLevel || 0,
-            agentFoundationalPromptProps,
-            agentChatProps?.messageHistory || [],
-            state,
-            convoTwo,
-            convoThree,
-            agentChatProps?.userId || "",
-            agentChatProps?.teamName || "",
-            agentChatProps?.messageGoRound || false,
-            contextSets,
-            vectorStore,
-            textChatLogs || []
-          )),
-          ...AGENT_TOOLS_contextSets(contextSets, textChatLogs || [], currentAgent, allAgents),
-        };
-      }
-      break;
-      
-    case AgentTypeEnum.TOOL_OPERATOR:
-      // Only TOOL_OPERATOR agents can use custom tools
-      if (agentFoundationalPromptProps.customTools && Object.keys(agentFoundationalPromptProps.customTools).length > 0) {
-        logger.tool("Loading custom tools for TOOL_OPERATOR agent", {
-          agentName: agentFoundationalPromptProps.thisAgentName,
-          customToolCount: Object.keys(agentFoundationalPromptProps.customTools).length,
-          customToolNames: Object.keys(agentFoundationalPromptProps.customTools).join(", ")
-        });
-        
-        textChatLogs?.push({
-          role: "system",
-          message: `Loading ${Object.keys(agentFoundationalPromptProps.customTools).length} custom tools: ${Object.keys(agentFoundationalPromptProps.customTools).join(", ")}`,
-          agentName: agentFoundationalPromptProps.thisAgentName,
-        });
-
-        const customTools: CustomToolDefinition[] = Object.values(agentFoundationalPromptProps.customTools);
-
-        _result = {
-          ..._result,
-          ...AGENT_TOOLS_loadCustomTools(
-            customTools,
-            agentFoundationalPromptProps.thisAgentName,
-            agentFoundationalPromptProps.userId || ""
-          ),
-        };
-      }
-      
-      _result = {
-        ..._result,
-        ...tools,
-        ...(await LOAD_AGENT_TOOLS(
-          agentFoundationalPromptProps.tools,
-          {},
-          contextSets,
-          vectorStore,
-          textChatLogs || [],
-          state,
-          agentFoundationalPromptProps.thisAgentName,
-          agentFoundationalPromptProps.userId,
-          agentChatProps.message,
-          agentFoundationalPromptProps.customTools
-        )),
-      };
-      break;
-
-    case AgentTypeEnum.DYNAMIC_TOOL:
-      tools = {
-        ...tools,
-        ...(await AGENT_TOOLS_dynamicScript(
-          agentFoundationalPromptProps.thisAgentName,
-          agentChatProps?.userId || "",
-          textChatLogs || []
-        )),
-      };
-      agentFoundationalPromptProps.tools = [
-        ...agentFoundationalPromptProps.tools,
-        AI_Agent_Tools.DYNAMIC_SCRIPT,
-      ];
-      _result = {
-        ..._result,
-        ...tools,
-        ...LOAD_AGENT_TOOLS(
-          agentFoundationalPromptProps.tools,
-          {},
-          contextSets,
-          vectorStore,
-          textChatLogs || [],
-          state,
-          agentFoundationalPromptProps.thisAgentName,
-          agentChatProps?.userId || "",
-          agentChatProps?.message || ""
-        ),
-      };
-      break;
-
-    default:
-      // For any other agent type, don't load custom tools
-      _result = {
-        ..._result,
-        ...tools,
-      };
-  }
-  _result = {
-    ..._result,
-
-    // ...(await AGENT_TOOLS_agentDiary(
-    //   agentFoundationalPromptProps.thisAgentName,
-    //   agentFoundationalPromptProps.teamName || "",
-    //   agentFoundationalPromptProps.userId || ""
-    // )),
-  };
-  if (hasKnowledgeBase) {
-    _result = {
-      ..._result,
-      ...AGENT_TOOLS_knowledgeBase_query(
-        agentFoundationalPromptProps.userId || "",
-        agentFoundationalPromptProps.thisAgentName,
-        agentFoundationalPromptProps.teamName || ""
-      ),
-    };
-  }
-  logger.tool("Loading agent-specific tools", {
-    action: "LOAD_AGENT_TOOLS",
-    agentType: type,
-    toolCount: Object.keys(_result).length,
-    hasKnowledgeBase,
-  });
-
-  // Log information about custom tools if present, but only for TOOL_OPERATOR agents
-  if (type === AgentTypeEnum.TOOL_OPERATOR && 
-      agentFoundationalPromptProps.customTools && 
-      Object.keys(agentFoundationalPromptProps.customTools).length > 0) {
-    logger.tool("Custom tools available to TOOL_OPERATOR", {
-      action: "CUSTOM_TOOLS_LOADED",
-      agentName: agentFoundationalPromptProps.thisAgentName,
-      customToolCount: Object.keys(agentFoundationalPromptProps.customTools).length,
-      customToolNames: Object.keys(agentFoundationalPromptProps.customTools).join(", ")
-    });
-  }
-
-  logger.tool("Validating tool configuration", {
-    action: "VALIDATE_TOOL_CONFIG",
-    agentType: type,
-    requestedTools: tools ? Object.keys(tools).length : 0,
-    hasContextSets: !!contextSets?.length,
-  });
-
-  try {
-    // ... existing tool loading code ...
-  } catch (error) {
-    logger.error("Failed to load agent tools", {
-      action: "TOOL_LOAD_ERROR",
-      agentType: type,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
-
-  logger.tool("Successfully loaded agent tools", {
-    action: "TOOLS_LOADED",
-    agentName: agentFoundationalPromptProps.thisAgentName,
-    agentType: type,
-    loadedTools: Object.keys(_result),
-    totalTools: Object.keys(_result).length,
-  });
-
-  if (hasKnowledgeBase) {
-    logger.log("Loading knowledge base tools", {
-      action: "LOAD_KB_TOOLS",
-      agent: agentFoundationalPromptProps.thisAgentName,
-      userId: agentFoundationalPromptProps.userId,
-    });
-  }
-
-  if (textChatLogs?.length) {
-    logger.debug("Chat logs accumulated during tool loading", {
-      action: "TOOL_CHAT_LOGS",
-      logCount: textChatLogs.length,
-      lastLogType: textChatLogs[textChatLogs.length - 1].role,
-    });
-  }
-
-  return _result;
 }
 
 async function _generateDynamicPrompt(

@@ -2,7 +2,9 @@ import { PrismaClient } from '@prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate'
 
 declare global {
-    var prisma: ReturnType<typeof prismaClientSingleton> | undefined
+    // Use a type alias for the singleton return type for clarity
+    type PrismaClientSingleton = ReturnType<typeof prismaClientSingleton>
+    var prisma: PrismaClientSingleton | undefined
 }
 
 const prismaClientSingleton = () => {
@@ -16,11 +18,12 @@ const prismaClientSingleton = () => {
     }).$extends(withAccelerate())
 }
 
-export const db: PrismaClient = globalThis.prisma ?? prismaClientSingleton()
+// Remove the explicit PrismaClient type annotation to allow inference of the extended type
+export const db = globalThis.prisma ?? prismaClientSingleton()
 
 if (process.env.NODE_ENV !== 'production') {
     globalThis.prisma = db
 }
 
-// Export for backwards compatibility
+// Export for backwards compatibility - This also benefits from the inferred type
 export const prisma = db

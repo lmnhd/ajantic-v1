@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# "use server" File Constraints (Next.js)
+
+Files marked with the `"use server"` directive at the top have strict limitations in Next.js 14.
+
+-   **Only Async Exports:** These files can *only* export asynchronous functions. Exporting constants, objects, or synchronous functions directly will cause a build error.
+-   **Example:** [src/lib/orchestration/utils/agent-execution.ts](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts) is a `"use server"` file. We encountered an error previously because the `ValidationSchema` (a constant object) was initially exported from here.
+-   **Solution:** Non-function exports, like type definitions (`interface`, `type`) or Zod schemas (`const schema = z.object(...)`), should be defined in separate files that are *not* marked `"use server"`. For example, `ValidationSchema` was moved to [src/lib/orchestration/types/base.ts](mdc:ajantic-v1/src/lib/orchestration/types/base.ts).
+

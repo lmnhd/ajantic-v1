@@ -17,6 +17,7 @@ import {
     AgentTurnResult,
     OrchestrationFinalResult,
     OrchestrationState,
+    ClientAugmentedServerMessage,
 } from "../types";
 import {
     ORCHESTRATION_executeAgentTurn,
@@ -199,7 +200,7 @@ function formatFinalResult(state: OrchestrationState): OrchestrationFinalResult 
         status: finalStatus, 
         finalConversationHistory: state.conversationHistory, 
         finalContextSets: state.contextSets,
-        error: state.error, 
+        error: state.error || undefined, 
         totalRounds: state.currentRound 
     };
 }
@@ -214,7 +215,7 @@ function formatFinalResult(state: OrchestrationState): OrchestrationFinalResult 
 export async function ORCHESTRATION_runManagerDirectedWorkflow(
     initialState: OrchestrationState,
     sessionState: AISessionState,
-    
+    updateUIStateCallback: (state: OrchestrationState) => Promise<void>
 ): Promise<OrchestrationFinalResult> {
     let state = { ...initialState };
     state.status = "running";
@@ -314,14 +315,47 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                 expectedOutput: turnResult.agentDirectives?.expectedOutput
             };
             state.conversationHistory = [...state.conversationHistory, agentResponseMessage];
+            const currentMessageIndex = state.conversationHistory.length - 1;
+
+            await updateUIStateCallback(state);
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             if (turnResult.error) {
                 logger.error(`Agent ${turnResult.agentName} turn resulted in error: ${turnResult.error}`);
-                // Route back to manager on agent error
-                nextAgent = managerAgent;
-                messageForNextAgent = `Agent ${turnResult.agentName} encountered an error: ${turnResult.error}. Original task message was: ${turnInput.message}`;
-                state.currentRound++;
-                continue; // Go to start of loop to process manager turn
+
+                // --- MODIFICATION START: Conditional Error Handling ---
+                const stopOnError = state.config.stopOnError !== false; // Default to true if undefined
+
+                if (turnResult.agentName === managerAgent.name) {
+                    // Manager errors always stop the workflow (usually not recoverable)
+                    logger.error(`Manager agent ${turnResult.agentName} encountered an error: ${turnResult.error}. Workflow stopping.`);
+                    state.status = "error";
+                    state.error = `Manager agent ${turnResult.agentName} encountered an error: ${turnResult.error}.`;
+                    state.resumableErrorAgentName = null;
+                    state.resumableErrorMessage = null;
+                    break; // Exit loop for manager error
+
+                } else if (stopOnError) {
+                    // --- Stop and Store Resumable Info (if stopOnError is true) ---
+                    logger.warn(`Agent ${turnResult.agentName} error. Workflow stopping as configured (stopOnError=true). Storing state for resume.`);
+                    state.status = "error";
+                    state.error = `Agent ${turnResult.agentName} encountered an error: ${turnResult.error}. Workflow halted but may be resumable.`;
+                    state.resumableErrorAgentName = turnResult.agentName;
+                    state.resumableErrorMessage = turnInput.message;
+                    break; // Exit loop
+
+                } else {
+                    // --- Route Back to Manager (if stopOnError is false) ---
+                    logger.warn(`Agent ${turnResult.agentName} error. Routing back to manager as configured (stopOnError=false).`);
+                    nextAgent = managerAgent;
+                    messageForNextAgent = `Agent ${turnResult.agentName} encountered an error: ${turnResult.error}. Please review the situation and decide the next step. Original task message was: ${turnInput.message}`;
+                    // Clear potential resume flags from previous runs if any
+                    state.resumableErrorAgentName = null;
+                    state.resumableErrorMessage = null;
+                    state.currentRound++; // Increment round as we are continuing with the manager turn
+                    continue; // Go to start of the next loop iteration for the manager
+                }
+                // --- MODIFICATION END ---
             }
 
             // --- Determine Next Step based on who just ran --- //
@@ -353,6 +387,9 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                 state.contextSets = turnResult.allContextSets;
                                 logger.log(`Using pre-processed context sets with ${turnResult.allContextSets.length} items`);
                                 
+                                await updateUIStateCallback(state);
+                                await new Promise(resolve => setTimeout(resolve, 500));
+
                                 // Update the agent response to include form prompt if not already added
                                 if (agentResponseMessage && !agentResponseMessage.content.includes("Please fill out the form")) {
                                     agentResponseMessage.content += "\n\n**Please fill out the form below to provide the requested information.**";
@@ -377,6 +414,9 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                 logger.log(`Using pre-processed context sets with ${turnResult.allContextSets.length} items`);
                                 state.contextSets = turnResult.allContextSets;
                                 
+                                await updateUIStateCallback(state);
+                                await new Promise(resolve => setTimeout(resolve, 500));
+
                                 // Include the context set in the message for UI display
                                 if (agentResponseMessage && turnResult.contextSet) {
                                     agentResponseMessage.contextSet = turnResult.contextSet;
@@ -392,9 +432,18 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                         logger.warn(`Manager directed to invalid agent '${messageTo}' via structured output, defaulting to manager.`);
                         nextAgent = managerAgent;
                         messageForNextAgent = `Could not find agent ${messageTo}. Please clarify direction.`;
+                        // No recipient to add if defaulting back to manager
                     } else {
                         nextAgent = selectedAgent;
                         messageForNextAgent = turnResult.agentDirectives?.message || "";
+
+                        // *** AUGMENTATION POINT 1 (Structured) ***
+                        if (currentMessageIndex >= 0 && nextAgent.name !== managerAgent.name) {
+                           logger.info(`Augmenting manager message at index ${currentMessageIndex} with recipient: ${nextAgent.name}`);
+                           // Cast the specific message in the history
+                           (state.conversationHistory[currentMessageIndex] as ClientAugmentedServerMessage)._recipientAgentName = nextAgent.name;
+                        }
+                        // *** END AUGMENTATION 1 ***
                     }
                     
                     // Check if the manager's turn result included context updates
@@ -444,6 +493,9 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                             state.contextSets.splice(index, 1);
                                             logger.log(`Removed context set "${update.name}" (empty context provided)`);
                                             
+                                            await updateUIStateCallback(state);
+                                            await new Promise(resolve => setTimeout(resolve, 500));
+                                            
                                             // Mark this deletion explicitly in the agent response for better client sync
                                             const deletionInfo = {
                                                 deletedSet: update.name,
@@ -480,10 +532,16 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                                 ...newSetData // Overwrite with new data
                                                 };
                                             logger.log(`Updated context set "${update.name}"`);
+                                            
+                                            await updateUIStateCallback(state);
+                                            await new Promise(resolve => setTimeout(resolve, 500));
                                         } else {
                                             // Add new context set
                                             state.contextSets.push(newSetData);
                                             logger.log(`Added new context set "${update.name}"`);
+                                            
+                                            await updateUIStateCallback(state);
+                                            await new Promise(resolve => setTimeout(resolve, 500));
                                         }
                                     }
                                     // --- Refactored Logic End ---
@@ -495,6 +553,8 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                             if (turnResult.updatedContextSets && turnResult.updatedContextSets.length > 0) {
                                 logger.log(`Adding ${turnResult.updatedContextSets.length} new context sets`);
                                 state.contextSets = [...state.contextSets, ...turnResult.updatedContextSets];
+                                await updateUIStateCallback(state);
+                                await new Promise(resolve => setTimeout(resolve, 500));
                             }
                             
                             // Handle edited context sets
@@ -502,7 +562,7 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                 logger.log(`Editing ${turnResult.editedContextSets.length} existing context sets`);
                                 
                                 // Apply each edit to the matching context set
-                                turnResult.editedContextSets.forEach(edit => {
+                                turnResult.editedContextSets.forEach(async edit => {
                                     const originalSetName = edit.originalSetName;
                                     const index = state.contextSets.findIndex(cs => cs.setName === originalSetName);
                                     
@@ -515,6 +575,9 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                             hiddenFromAgents: edit.hiddenFromAgents || state.contextSets[index].hiddenFromAgents
                                         };
                                         logger.log(`Updated context set "${originalSetName}"`);
+                                        
+                                        await updateUIStateCallback(state);
+                                        await new Promise(resolve => setTimeout(resolve, 500));
                                     } else {
                                         logger.warn(`Couldn't find context set "${originalSetName}" to edit`);
                                     }
@@ -529,32 +592,31 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                                 sets: state.contextSets
                             };
                         }
+                        
+                        // --- ADD UI UPDATE AND PAUSE ---
+                        // Placed here to capture all context changes within this block (structured directives -> agent)
+                        await updateUIStateCallback(state);
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        // --- END ADDITION ---
                     }
                 } else {
                     // Fall back to parsing the response text
                     const directive = _parseManagerResponse(turnResult.response, managerAgent.name, agents);
                     logger.log("Parsed Manager Directive from text:", { directive });
 
-                    // Create directives object from the parsed text directive and add it to the response message
-                    if (agentResponseMessage) {
+                    // Update the message in history with parsed directives
+                    if (currentMessageIndex >= 0) {
                         // Add the parsed directives to the agent message
-                        agentResponseMessage.agentDirectives = {
+                         state.conversationHistory[currentMessageIndex].agentDirectives = {
                             messageTo: directive.messageTo,
                             message: directive.message,
                             workflowComplete: directive.workflowComplete,
                             contextUpdates: directive.contextUpdates,
                             isInfoRequest: directive.isInfoRequest
                         };
-                        
                         // Add the expected output if it was parsed
                         if (directive.expectedOutput) {
-                            agentResponseMessage.expectedOutput = directive.expectedOutput;
-                        }
-                        
-                        // Replace the message in the conversation history
-                        const lastIndex = state.conversationHistory.length - 1;
-                        if (lastIndex >= 0) {
-                            state.conversationHistory[lastIndex] = agentResponseMessage;
+                            state.conversationHistory[currentMessageIndex].expectedOutput = directive.expectedOutput;
                         }
                     }
 
@@ -583,6 +645,9 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                             // Update the state with the modified context sets
                             state.contextSets = updatedContextSets;
                             
+                            await updateUIStateCallback(state);
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            
                             // Update the agent response to include form prompt
                             if (agentResponseMessage) {
                                 agentResponseMessage.content += "\n\n**Please fill out the form below to provide the requested information.**";
@@ -601,12 +666,21 @@ export async function ORCHESTRATION_runManagerDirectedWorkflow(
                     // Find the next agent based on parsed name
                     const selectedAgent = agents.find(a => a.name === directive.messageTo);
                     if (!selectedAgent) {
-                        logger.warn(`Manager directed to invalid agent '${directive.messageTo}', defaulting to manager.`);
+                        logger.warn(`Manager directed to invalid agent '${directive.messageTo}' via text parsing, defaulting to manager.`);
                         nextAgent = managerAgent;
                         messageForNextAgent = `Could not find agent ${directive.messageTo}. Please clarify direction.`;
+                         // No recipient to add if defaulting back to manager
                     } else {
                         nextAgent = selectedAgent;
                         messageForNextAgent = directive.message;
+
+                        // *** AUGMENTATION POINT 2 (Parsed Text) ***
+                         if (currentMessageIndex >= 0 && nextAgent.name !== managerAgent.name) {
+                           logger.info(`Augmenting manager message at index ${currentMessageIndex} with recipient: ${nextAgent.name}`);
+                           // Cast the specific message in the history
+                           (state.conversationHistory[currentMessageIndex] as ClientAugmentedServerMessage)._recipientAgentName = nextAgent.name;
+                        }
+                        // *** END AUGMENTATION 2 ***
                     }
                 }
             } else {

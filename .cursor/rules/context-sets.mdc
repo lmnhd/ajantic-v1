@@ -14,7 +14,7 @@ This rule provides a complete overview of how context sets are managed throughou
 
 ## Core Types and Data Structure
 
-- **`ContextContainerProps`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts)): The primary type representing a single context set with properties like:
+- **`ContextContainerProps`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/types.ts)): The primary type representing a single context set with properties like:
   - `setName`: Identifier for the set
   - `text`: The main content of the set (string)
   - `lines`: Optional array of line items (for structured content)
@@ -22,40 +22,78 @@ This rule provides a complete overview of how context sets are managed throughou
   - `hiddenFromAgents`: Array of agent names who shouldn't see this context
   - `formSchema`: Optional schema for form-based context sets
 
-- **`ContextSet`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts)): Groups an array of `ContextContainerProps` under a `teamName` property.
+- **`ContextSet`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/types.ts)): Groups an array of `ContextContainerProps` under a `teamName` property.
 
-- **`ServerMessage`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/src/lib/types.ts)): Can contain:
+- **`ServerMessage`** ([src/lib/types.ts](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/types.ts)): Can contain:
   - `contextSet`: The complete updated context after an agent turn
   - `contextDeleted`: Metadata about explicitly deleted contexts
   - `agentDirectives.contextSetUpdate`: Instructions for context modifications
 
-## State Flow Architecture
+## State Management Architecture
+
+### Dual State Management
+
+The application maintains two copies of the context sets in the Zustand store:
+
+1. **`contextSet`**: Direct top-level property in the store
+2. **`localState.contextSet`**: Nested inside the AISessionState object
+
+All operations must update both state locations to maintain consistency. This dual structure facilitates:
+- Integration with legacy components that may reference either property
+- Support for server-side state management which primarily uses the nested version
+- Future migration path to a single source of truth
+
+### State Flow Architecture
 
 1. **Server-Side Context Management**:
-   - Orchestration workflows ([src/lib/orchestration/modes/manager-directed.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/modes/manager-directed.ts)) handle context updates based on agent directives
+   - Orchestration workflows ([src/lib/orchestration/modes/manager-directed.ts](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/orchestration/modes/manager-directed.ts)) handle context updates based on agent directives
    - Manager directives specify context creation, updates, and deletions
    - Deletions are tracked via special `contextDeleted` metadata in messages
    - Server sends the final context state back to the client
 
 2. **Client-Side State Management**:
-   - **Zustand Store** ([src/lib/store/analysis-store.ts](mdc:ajantic-v1/ajantic-v1/src/lib/store/analysis-store.ts)):
+   - **Zustand Store** ([src/lib/store/analysis-store.ts](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/store/analysis-store.ts)):
      - Primary source of truth for application state
-     - `localState.contextSet` holds the active context sets
+     - Both `contextSet` and `localState.contextSet` hold the active context sets
+     - Store actions manage synchronization between these two state locations
+     - CRUD operations are implemented as store actions (e.g., `updateContextContainer`, `deleteContextContainer`)
+     - Identity checks prevent unnecessary rerenders when content hasn't changed
      - `updateLocalState` method handles merging of incoming server changes
      - Special handling for preserving disabled contexts that weren't explicitly deleted
      - Context deletions tracked via a Set of deletion markers
      
-   - **Component State** ([components/context-set-component.tsx](mdc:ajantic-v1/ajantic-v1/components/context-set-component.tsx)):
+   - **Component State** ([components/context-set-component.tsx](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/components/context-set-component.tsx)):
      - UI-focused state for editing and display of context sets
      - Provides user interactions for CRUD operations
      - Communicates with store to update global state
+     - Uses store actions directly rather than managing local copies of state
 
 3. **Persistence Layer**:
    - `handleSaveContextSet` persists sets to database
    - `SERVER_getSavedContextSets` retrieves saved sets for loading
    - `handleDeleteContextSet(s)` removes from database
 
-## Context Update Mechanisms
+## Context Operations
+
+### Context Creation and Modification
+
+All context operations are handled through store actions to maintain state consistency:
+
+- **`updateContextSet`**: Updates context set properties, with identity checks to prevent needless rerenders
+- **`addContextContainer`**: Adds a new context container to both state locations
+- **`updateContextContainer`**: Updates a specific container with identity checks to prevent update loops
+- **`toggleAgentVisibility`**: Manages which agents can see specific context sets
+- **`shiftContextContainer`**: Reorders context containers in the array
+- **`clearContextText`**: Clears text content from a container
+
+### Context Deletion
+
+Deletion is managed through the `deleteContextContainer` store action:
+
+1. Filters both state arrays to remove the container at the specified index
+2. Ensures both state locations (`contextSet` and `localState.contextSet`) are updated 
+3. Provides proper logging for debugging
+4. Uses immutable state updates to ensure proper render cycles
 
 ### Manager-Directed Updates
 
@@ -84,25 +122,54 @@ The `updateLocalState` and `handleOrchestratedChatSubmit` functions handle mergi
 Form-based context updates follow a special flow:
 
 1. Manager issues an info request with `isInfoRequest: true`
-2. `processInfoRequestContextForm` in [src/lib/orchestration/utils/context-processor.ts](mdc:ajantic-v1/ajantic-v1/src/lib/orchestration/utils/context-processor.ts) creates a form schema
+2. `processInfoRequestContextForm` in [src/lib/orchestration/utils/context-processor.ts](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/orchestration/utils/context-processor.ts) creates a form schema
 3. User fills the form, and data is converted to a context set
 4. This creates a structured data context rather than freeform text
+
+## Preventing UI Update Issues
+
+1. **Identity Checks**: Operations like `updateContextContainer` perform checks to avoid unnecessary state updates:
+   ```typescript
+   // Check if any actual changes happened
+   let hasChanges = false;
+   for (const key in updates) {
+     if (JSON.stringify(currentSet[key]) !== JSON.stringify(updates[key])) {
+       hasChanges = true;
+       break;
+     }
+   }
+   
+   // Skip update if nothing changed
+   if (!hasChanges) return state;
+   ```
+
+2. **Immutable Updates**: All state updates create new object references using spreads:
+   ```typescript
+   const updatedSets = [...state.localState.contextSet.sets];
+   updatedSets[index] = { ...currentSet, ...updates };
+   ```
+
+3. **Component Architecture**: UI components call store actions directly rather than maintaining local copies:
+   ```typescript
+   const deleteSetFromContainer = (index: number) => {
+     deleteContextContainer(index);
+   };
+   ```
 
 ## Key API Interactions
 
 ### Context Creation
-- `addSetToContainer`: Adds empty context containers
-- `storeAnalysisSet`: Persists to database with name
+- `addContextContainer`: Adds empty context containers to both state locations
+- `handleSaveContextSet`: Persists to database with name
 
 ### Context Modification
-- `handleSetLabelName`: Renames context sets
-- `editText`: Updates context content
-- `toggleHideFromAgents`: Changes visibility per agent
-- `shiftSetUpOrDown`: Reorders context sets
+- `updateContextContainer`: Updates specific properties of a container
+- `toggleAgentVisibility`: Changes visibility per agent
+- `shiftContextContainer`: Reorders context sets
+- `clearContextText`: Clears text without removing the container
 
 ### Context Deletion
-- `deleteTextFromSet`: Clears content but keeps container
-- `deleteSetFromContainer`: Removes container from current state
+- `deleteContextContainer`: Removes container from both state locations
 - `handleDeleteContextSet`: Removes from database
 - Server-side deletions via empty context in manager directives
 
@@ -116,5 +183,9 @@ Form-based context updates follow a special flow:
 
 4. **Agent Visibility**: Each context set tracks which agents cannot see it via `hiddenFromAgents`.
 
-This comprehensive system enables dynamic context management throughout agent-based workflows while preserving user customizations.
+5. **Dual State Synchronization**: Actions keep top-level and nested state in sync.
+
+This comprehensive system enables dynamic context management throughout agent-based workflows while preserving user customizations and maintaining smooth UI performance.
+
+
 

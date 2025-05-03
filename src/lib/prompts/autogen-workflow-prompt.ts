@@ -1,6 +1,6 @@
 import { AgentComponentProps, AgentType, AI_Agent_ToolsDescription } from "@/src/lib/types"
 import { UTILS_getAllAvailableToolsDescriptions } from "@/src/lib/utils"
-import { AutoGenTeam } from "../autogen/autogen"
+import { AutoGenTeam } from "../autogen/autogen-types"
 import { UTILS_jsonToXmlString } from "@/src/lib/teams/lib/teams-utils"
 
 export const PROMPT_AUTO_GENERATE_WORKFLOW = {

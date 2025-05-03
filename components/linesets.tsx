@@ -3,7 +3,7 @@ import React, { useEffect } from "react";
 
 import ReferenceStateView from "@/components/global/reference-stateview";
 import { useGlobalStore } from "@/src/lib/store/GloabalStoreState";
-import { LineLyricType } from "@/components/songeditor/lyric/line";
+
 import { cn, UTILS_putGenericData } from "@/src/lib/utils";
 import { ExitIcon, PlusCircledIcon, PlusIcon } from "@radix-ui/react-icons";
 import {
@@ -91,7 +91,7 @@ const LineSets = ({
     if (!appState.currentUser) return;
     console.log("getting all analysis states", appState.currentUser?.id);
     
-    const result = await __getAllStoredAnalysisSets(appState.currentUser?.id || "");
+    const result = await __getAllStoredAnalysisSets();
     console.log("all analysis state result: ", result);
     
     if (lineSetStates.length === 0) {
@@ -159,11 +159,7 @@ const LineSets = ({
     const name = prompt("Name this analysis set");
     if (!name) return;
 
-    await __storeAnalysisSet({
-      analysisName: name,
-      contextSets: localSets,
-      userId: appState.currentUser?.id || "",
-    });
+    await __storeAnalysisSet();
 
     // Refresh the line states
     await getAllAnalysisStates();
@@ -203,7 +199,7 @@ const LineSets = ({
     setLockHandleSetsChanged(false);
     console.log("converting lines to text", index);
     const _sets = [...localSets];
-    _sets[index].text = _sets[index].lines.map((line) => line.text).join("\n");
+    _sets[index].text = _sets[index].lines?.map((line) => line.content).join("\n") || "";
     _sets[index].lines = [];
     setLocalSets(_sets);
   };
@@ -268,7 +264,7 @@ const LineSets = ({
 
     const _sets = [...localSets];
     const _set = _sets[index];
-    _set.lines.splice(index, 1);
+    _set.lines?.splice(index, 1);
     _sets[currentContextItem] = _set;
     setLocalSets(_sets);
   };
@@ -277,7 +273,7 @@ const LineSets = ({
     setLockHandleSetsChanged(false);
     console.log("deleting single line from set", setIndex, lineIndex);
     const _sets = [...localSets];
-    _sets[setIndex].lines.splice(lineIndex, 1);
+    _sets[setIndex].lines?.splice(lineIndex, 1);
     setLocalSets(_sets);
   };
 
@@ -452,8 +448,8 @@ const LineSets = ({
                 >
                   <ContextContainer
                     key={i}
-                    lines={set.lines}
-                    text={set.text}
+                    lines={set.lines ?? []}
+                    text={set.text ?? ""}
                     name={set.setName}
                     currentAgentsForVisibility={allAgents}
                     agentNames={allAgents.map((a) => a.name)}

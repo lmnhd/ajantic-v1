@@ -22,16 +22,19 @@ import {
   Expand,
   Shrink,
   Fullscreen,
+  Trash2Icon,
 } from "lucide-react";
 import React, { useEffect, useState, useRef } from "react";
 import { AgentComponentProps, ServerMessage } from "@/src/lib/types";
 import {
   DynamicFormSchema,
+  
 } from "@/src/lib/types";
 import DynamicForm from "./dynamic-form";
 
 import { useFullscreen } from "../src/lib/useFullscreen";
 import { useAnalysisStore } from "../src/lib/store/analysis-store";
+import { DynamicFormValueType } from "@/src/lib/post-message-analysis/form-creator-core";
 
 type ThemeColor = 'violet' | 'blue' | 'indigo' | 'purple' | 'slate' | 'gray' | 'zinc' | 'emerald' | 'green' | 'red' | 'yellow' | string;
 
@@ -418,18 +421,22 @@ export default function ContextContainer({
                   <div
                     onClick={(e) => {
                       if (deleteSet) {
+                        console.log("Delete button clicked for set index:", index);
                         if (
                           window.confirm(
                             "Are you sure you want to delete this set?"
                           )
                         ) {
+                          console.log("Confirmation accepted, calling deleteSet with index:", index);
                           deleteSet(index);
                         }
+                      } else {
+                        console.error("deleteSet prop is undefined");
                       }
                     }}
                     className="cursor-pointer"
                   >
-                    <Disc3Icon className="w-4 h-4 text-red-500" />
+                    <Trash2Icon className="w-4 h-4 text-red-500" />
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -630,7 +637,10 @@ export default function ContextContainer({
         {formSchema && text === "" && (
           <div className="w-full p-4">
             <DynamicForm
-              schema={formSchema.schema}
+              schema={formSchema.schema.map(item => ({
+                ...item,
+                valueType: item.valueType.toLowerCase() as DynamicFormValueType
+              }))}
               onSubmit={(values: any) => {
                 // First convert form data to a text string in markup format
                 let formData;

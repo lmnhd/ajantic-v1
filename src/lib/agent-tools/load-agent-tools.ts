@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { AGENT_TOOLS_pinecone } from "./pinecone";
-import { AGENT_TOOLS_splitters } from "./pinecone";
+import { AGENT_TOOLS_pinecone } from "./pinecone-db/pinecone";
+import { AGENT_TOOLS_splitters } from "./pinecone-db/pinecone";
 import {
   AI_Agent_Tools,
   AISessionState,
@@ -15,7 +15,7 @@ import {
   AGENT_TOOLS_generateReferenceDocuments,
   AGENT_TOOLS_urlScrape,
 } from "./url-scrape/url-scrape";
-import { AGENT_TOOLS_contextSets } from "./context-sets";
+import { AGENT_TOOLS_contextSets } from "./context-sets/context-sets";
 import { AGENT_TOOLS_fetch } from "./fetch/fetch";
 import { AGENT_TOOLS_puppeteer } from "./puppeteer-tool/puppeteer";
 import { VectorStoreRetriever } from "@langchain/core/vectorstores";

@@ -71,7 +71,6 @@ import { TextChatLogProps } from "./text-chat-log";
 import { messageRouter } from "./message-router";
 import { MEMORY_store } from "./agent-memory/store-retrieve";
 import { logger } from "@/src/lib/logger";
-import { GmailService } from "./agent-tools/gmail.server";
 import {
   AGENT_FORM_creator,
   AGENT_FORM_reWriteRequestMessage,

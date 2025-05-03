@@ -39,6 +39,12 @@ export async function initialize(userId: string, set: Function, get: Function) {
     console.log("[AnalysisStore] Loading IndexDB state...");
     const indexDBState = await AnalysisStorage.FROZEN_STATE_loadFromIndexDB();
     
+    // Explicitly remove contextSets if it exists on the loaded object
+    if (indexDBState && (indexDBState as any).contextSets) {
+      console.warn("[AnalysisStore] Found and removing deprecated 'contextSets' property from loaded IndexDB state.");
+      delete (indexDBState as any).contextSets;
+    }
+
     // Flag to track if we successfully loaded from IndexedDB
     const loadedFromIndexDB = !!indexDBState;
 
@@ -51,7 +57,10 @@ export async function initialize(userId: string, set: Function, get: Function) {
       // Handle contextSet carefully based on what's available in indexDBState
       let contextSetToUse;
       
-      if ((indexDBState as any).lineSets) {
+      if ((indexDBState as any).contextSet) {
+        console.log("[AnalysisStore] Using existing contextSet from IndexDB");
+        contextSetToUse = (indexDBState as any).contextSet;
+      } else if ((indexDBState as any).lineSets) {
         console.log("[AnalysisStore] Found legacy lineSets, converting to contextSet format");
         // Convert old lineSets to new contextSet format
         contextSetToUse = {
@@ -60,16 +69,13 @@ export async function initialize(userId: string, set: Function, get: Function) {
             lines: set.lines || [],
             text: set.text || "",
             isDisabled: set.isDisabled || false,
-            setName: set.setName || set.lineSetName || "",
+            setName: set.setName || set.lineSetName || `Set_${Date.now()}`,
           })),
         };
-      } else if ((indexDBState as any).contextSet) {
-        console.log("[AnalysisStore] Using existing contextSet");
-        contextSetToUse = (indexDBState as any).contextSet;
       } else {
         console.log("[AnalysisStore] No contextSet or lineSets found, using empty context");
         contextSetToUse = {
-          teamName: "Default Team",
+          teamName: indexDBState.localState?.currentAgents?.name || "Default Team",
           sets: []
         };
       }
@@ -209,10 +215,10 @@ export async function initialize(userId: string, set: Function, get: Function) {
         currentConversation: loadedFromIndexDB ? 
           (indexDBState as AppFrozenState).currentConversation : 
           (serverStateResponse?.currentConversation || []),
-        contextSet: serverStateResponse?.contextSet || {
-          teamName: "Default Team",
-          sets: [],
-        },
+        //contextSet: serverStateResponse?.contextSet || {
+        //  teamName: "Default Team",
+        //  sets: [],
+        //},
         savedAgentStates: {
           agents: [],
           teams: [],
@@ -386,9 +392,9 @@ export async function saveState(get: Function, set: Function) {
     const frozenState: AppFrozenState = {
       localState: state.localState,
       currentConversation: state.currentConversation,
-      contextSet: state.contextSet,
+      //contextSet: state.contextSet,
       analysisSet: {
-        contextSet: state.contextSet,
+        //contextSet: state.contextSet,
         analysisName: state.localState.currentAgents?.name || "",
         userId: state.localState.userId,
       },
@@ -420,7 +426,7 @@ export async function megaLoadStateFromBrowserOrServer(
     type SafeDataSource = {
       localState: AISessionState;
       currentConversation: ServerMessage[];
-      contextSet: { teamName: string; sets: any[] };
+      //contextSet: { teamName: string; sets: any[] };
       orchestrationState?: {
         agentOrder?: string;
         rounds?: number;
@@ -434,7 +440,7 @@ export async function megaLoadStateFromBrowserOrServer(
     let dataSource: SafeDataSource = {
       localState: { userId: state.localState.userId } as AISessionState,
       currentConversation: [],
-      contextSet: { teamName: "Default Team", sets: [] }
+      //contextSet: { teamName: "Default Team", sets: [] }
     };
     
     if (indexDBState) {
@@ -491,7 +497,7 @@ export async function megaLoadStateFromBrowserOrServer(
     set({
       localState: updatedLocalState, 
       currentConversation: dataSource.currentConversation,
-      contextSet: dataSource.contextSet,
+      //contextSet: dataSource.contextSet,
       isInitialized: true,
       // Set top-level orchestration properties for UI components
       ...orchestrationSettings
@@ -502,10 +508,10 @@ export async function megaLoadStateFromBrowserOrServer(
       const frozenState: AppFrozenState = {
         localState: updatedLocalState,
         currentConversation: dataSource.currentConversation,
-        contextSet: dataSource.contextSet,
+        //contextSet: dataSource.contextSet,
         orchestrationState: orchestrationSettings,
         analysisSet: {
-          contextSet: dataSource.contextSet,
+          //contextSet: dataSource.contextSet,
           analysisName: updatedLocalState.currentAgents?.name || "",
           userId: updatedLocalState.userId,
         },
@@ -524,7 +530,7 @@ export async function updateLocalState(
   set: Function
 ) {
   const state = get();
-  
+
   // Create properly typed orchestration settings type
   type OrchestrationSettings = {
     agentOrder: "sequential" | "seq-reverse" | "random";
@@ -533,14 +539,24 @@ export async function updateLocalState(
     orchestrationMode: OrchestrationType2;
     customAgentSet: string[];
   };
-  
+
+  // Destructure known properties handled separately or to be ignored
+  const {
+    orchestrationSettings: _, // handled below
+    currentAgents: __,        // handled below
+    genericData: ___,         // handled below
+    // Also capture the intended contextSet if provided
+    contextSet: incomingContextSet,
+    ...allowedTopLevelUpdates // Capture the rest of the allowed top-level properties
+  } = newState;
+
   // Perform immutable deep merge with properly created new object references
   const updatedLocalState: AISessionState = {
     // Start with a new copy of the full existing state
     ...state.localState,
-    
+
     // Handle orchestrationSettings immutably
-    orchestrationSettings: newState.orchestrationSettings 
+    orchestrationSettings: newState.orchestrationSettings
       ? { // If new state includes orchestrationSettings, create a new object with the merged values
           ...(state.localState.orchestrationSettings || {
             agentOrder: state.agentOrder as "sequential" | "seq-reverse" | "random",
@@ -559,7 +575,7 @@ export async function updateLocalState(
           orchestrationMode: state.orchestrationMode,
           customAgentSet: state.customAgentSet
         },
-    
+
     // Handle currentAgents immutably if included in the update
     currentAgents: newState.currentAgents
       ? {
@@ -573,27 +589,30 @@ export async function updateLocalState(
               : []
         }
       : state.localState.currentAgents,
-    
+
     // Handle genericData immutably
     genericData: newState.genericData
       ? { ...(state.localState.genericData || {}), ...newState.genericData }
       : state.localState.genericData || {},
-    
-    // Add other top-level properties from newState directly
-    ...newState
+
+    // Apply only the allowed top-level updates, excluding ignored ones
+    ...allowedTopLevelUpdates,
+
+    // Explicitly handle the correct 'contextSet' property
+    // Use incomingContextSet if provided, otherwise keep the existing one
+    contextSet: incomingContextSet !== undefined ? incomingContextSet : state.localState.contextSet
   };
-  
+
   console.log("[core-state] Updating local state...", {
     hasOrchestrSettings: !!updatedLocalState.orchestrationSettings,
     orchestrationMode: updatedLocalState.orchestrationSettings?.orchestrationMode,
-    sameRef: updatedLocalState === state.localState, // Should be false (different references)
-    sameOrchestrRef: updatedLocalState.orchestrationSettings === state.localState.orchestrationSettings // Should be false (different references)
+    sameRef: updatedLocalState === state.localState, // Should be false
+    sameOrchestrRef: updatedLocalState.orchestrationSettings === state.localState.orchestrationSettings // Should be false if changed
   });
 
-  // Update both localState and contextSets in the store
+  // Update localState in the store
   set({
     localState: updatedLocalState,
-    contextSet: newState.contextSet || state.contextSet,
     // Also update top-level orchestration state for UI components
     agentOrder: updatedLocalState.orchestrationSettings?.agentOrder || state.agentOrder,
     rounds: updatedLocalState.orchestrationSettings?.rounds || state.rounds,

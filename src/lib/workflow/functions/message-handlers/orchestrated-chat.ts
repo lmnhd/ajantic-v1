@@ -229,9 +229,12 @@ export async function handleOrchestratedChatSubmit(
     set({
       agentActive: false,
       currentConversation: result.finalConversationHistory,
-      contextSet: {
-        sets: finalMergedSets, // Use the merged sets
-        teamName: stateData.teamName // Keep existing team name or use one from result if available
+      localState: {
+        ...stateData.localState,
+        contextSet: {
+          sets: finalMergedSets, // Use the merged sets
+          teamName: stateData.teamName // Keep existing team name or use one from result if available
+        }
       }
     });
 

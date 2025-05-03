@@ -1,3 +1,4 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import {
@@ -14,13 +15,11 @@ import Navbar from "@/components/global/navbar";
 import { Toaster } from "@/components/ui/toaster";
 import { AIProvider } from "../lib/aicontext";
 import AuthProviders from "../lib/providers/auth-providers";
+import { StoreInitializer } from "@/components/global/StoreInitializer"; // Import the initializer
+
 const inter = Inter({ subsets: ["latin"] });
 
-// If you have metadata, you can include it here
-// export const metadata: Metadata = {
-//   title: "Your App Title",
-//   description: "Your App Description",
-// };
+// ... metadata ...
 
 export default function RootLayout({
   children,
@@ -33,17 +32,11 @@ export default function RootLayout({
       signUpFallbackRedirectUrl="/"
     >
       <html lang="en" suppressHydrationWarning={true}>
-        <body
-        //className="w-3/4 mx-auto"
-          // className={cn(
-          //   "dark:bg-black? bg-dot-white/[0.2] dark:text-violet-200",
-          //   inter.className
-          // )}
-          //className="w-full dark:bg-black bg-white  dark:bg-grid-white/[0.2] bg-grid-black/[0.2] relative flex items-center justify-center"
-        >
-          <div 
-          >
+        <body /* ... className */ >
+          <div> {/* Keep this div or adjust structure as needed */}
             <AuthProviders>
+              {/* Place Initializer inside AuthProviders and ClerkProvider context */}
+              <StoreInitializer />
               <AIProvider>
                 <ThemeProvider
                   attribute="class"

@@ -1,8 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { ToolRegistry, ToolRegistryEntry } from "./registry";
+import { ToolRegistry } from "./registry";
 import { logger } from "@/src/lib/logger";
 import { getCustomToolId, isCustomToolReference } from "./custom-tool-ref";
+import { ToolRegistryEntry } from "./ct-types";
+import { validateImplementationString } from "./ct-utils";
 
 export const ToolFactory = {
   /**
@@ -58,61 +60,88 @@ export const ToolFactory = {
    * Creates an execute function for a tool
    */
   createExecuteFunction(toolEntry: ToolRegistryEntry) {
+    const validation = validateImplementationString(toolEntry.implementation);
+    if (!validation.isValid) {
+        logger.error(`ToolFactory: Invalid implementation structure for tool ${toolEntry.name}`, { toolId: toolEntry.id, validationError: validation.error });
+        return async function invalidExecute(params: any) {
+            return {
+                 _isToolError: true,
+                 success: false,
+                 error: `Tool Configuration Error: ${validation.error}`
+            };
+        }
+    }
+
     return async function execute(params: any) {
       try {
-        logger.tool(`Executing tool ${toolEntry.name}`, { 
+        logger.tool(`Executing tool ${toolEntry.name}`, {
           toolId: toolEntry.id,
-          params 
         });
         
         switch (toolEntry.implementationType) {
           case "function":
-            // Execute code using Function constructor (safer than eval)
-            // eslint-disable-next-line no-new-func
-            const fn = new Function('params', `
-              return (async () => {
-                try {
-                  ${toolEntry.implementation}
-                  return "No explicit return value from function";
-                } catch (error) {
-                  return "Error: " + error.message;
-                }
-              })();
-            `);
-            
-            return await fn(params);
+            try {
+                const funcDefinition = toolEntry.implementation;
+                const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+                const funcExecutor = new AsyncFunction('params', `return (${funcDefinition})(params);`);
+
+                return await funcExecutor(params);
+            } catch (execError) {
+                 logger.error(`ToolFactory: Error executing function implementation for ${toolEntry.name}`, { error: execError, toolId: toolEntry.id });
+                 return {
+                     _isToolError: true,
+                     success: false,
+                     error: `Tool Execution Error: ${execError instanceof Error ? execError.message : String(execError)}`
+                 };
+            }
             
           case "api":
-            // Call an external API
             const endpoint = (toolEntry.implementation || "").startsWith("{") 
-              ? JSON.parse(toolEntry.implementation).endpoint 
-              : toolEntry.implementation;
+              ? JSON.parse(toolEntry.implementation || "{}").endpoint || ""
+              : toolEntry.implementation || "";
               
             if (!endpoint) {
               throw new Error("No API endpoint specified for tool");
             }
             
+            logger.tool(`Calling API for tool ${toolEntry.name}`, { toolId: toolEntry.id });
             const response = await fetch(endpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(params)
             });
+            const apiResult = await response.text();
+            logger.tool(`Tool ${toolEntry.name} API result status: ${response.status}`, { toolId: toolEntry.id });
+
+            if (!response.ok) throw new Error(`API call failed with status ${response.status}: ${apiResult}`);
             
-            return await response.text();
+             try {
+                if(response.headers.get('content-type')?.includes('application/json')) {
+                    return JSON.parse(apiResult);
+                }
+             } catch (parseError) {
+                 logger.warn(`ToolFactory: API for ${toolEntry.name} returned non-JSON response despite content-type`, { toolId: toolEntry.id, status: response.status });
+             }
+            return apiResult;
             
           case "dynamic-script":
-            // Call to a dynamic script system if implemented
+            logger.warn(`ToolFactory: Dynamic script execution not implemented for tool ${toolEntry.name}`, { toolId: toolEntry.id });
             return `Dynamic script execution not yet implemented for tool ${toolEntry.name}`;
             
           default:
+            logger.error(`ToolFactory: Unsupported implementation type: ${toolEntry.implementationType}`, { toolId: toolEntry.id });
             return `Unsupported tool implementation type: ${toolEntry.implementationType}`;
         }
-      } catch (error) {
-        logger.error(`Error executing tool ${toolEntry.name}`, { 
-          error,
+      } catch (outerError) {
+        logger.error(`ToolFactory: Error executing tool ${toolEntry.name} (outer catch)`, {
+          error: outerError,
           toolId: toolEntry.id
         });
-        return `Error executing tool: ${error instanceof Error ? error.message : String(error)}`;
+        return {
+            _isToolError: true,
+            success: false,
+            error: `Error executing tool: ${outerError instanceof Error ? outerError.message : String(outerError)}`
+        };
       }
     };
   },
@@ -122,13 +151,29 @@ export const ToolFactory = {
    */
   buildTool(toolEntry: ToolRegistryEntry): Record<string, any> {
     try {
-      const parameters = JSON.parse(toolEntry.parameters);
-      const paramSchema = this.createParameterSchema(parameters);
+      let parametersArray: any[] = [];
+      if (toolEntry.parameters && typeof toolEntry.parameters === 'string') {
+          try {
+              parametersArray = JSON.parse(toolEntry.parameters);
+              if (!Array.isArray(parametersArray)) {
+                 logger.warn(`Parsed parameters for tool ${toolEntry.name} (ID: ${toolEntry.id}) was not an array. Defaulting to empty.`, { parsed: parametersArray });
+                 parametersArray = [];
+              }
+          } catch (e) {
+              logger.error(`Failed to parse parameters JSON for tool ${toolEntry.name} (ID: ${toolEntry.id})`, { error: e, paramsString: toolEntry.parameters });
+              parametersArray = [];
+          }
+      } else {
+           logger.warn(`Parameters field for tool ${toolEntry.name} (ID: ${toolEntry.id}) is missing or not a string. Assuming no parameters.`, { parameters: toolEntry.parameters });
+           parametersArray = [];
+      }
+      
+      const paramSchema = this.createParameterSchema(parametersArray);
       const executeFunc = this.createExecuteFunction(toolEntry);
       
       return {
         [toolEntry.name]: tool({
-          description: toolEntry.description,
+          description: toolEntry.description || "No description provided.",
           parameters: paramSchema,
           execute: executeFunc
         })

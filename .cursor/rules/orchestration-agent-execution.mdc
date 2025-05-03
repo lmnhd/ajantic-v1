@@ -1,0 +1,18 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Orchestration Flow and Agent Execution
+
+Orchestration modes, such as the one defined in [manager-directed.ts](mdc:ajantic-v1/src/lib/orchestration/modes/manager-directed.ts), typically manage the overall workflow logic. These mode files often run a loop on the **client-side**.
+
+Within this loop, calls are made to server actions located in [agent-execution.ts](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts). Key functions here include:
+
+*   `ORCHESTRATION_executeAgentTurn`: Handles turns for regular worker agents. Uses Vercel AI SDK's `generateText` for LLM interaction, including tool usage.
+    *   **Important:** Uses the `maxSteps` parameter in `generateText` (set > 1) to automatically handle the multi-step tool execution cycle (LLM decides tool -> execute tool -> LLM synthesizes result). The final synthesized text should be available in `response.text`.
+    *   Includes validation logic via `_validateWorkerResponse` if `expectedOutputCriteria` are provided by the manager.
+*   `ORCHESTRATION_executeManagerTurn`: Handles turns for manager agents. Uses Vercel AI SDK's `generateObject` to get structured directives (like next agent, message, context updates) from the manager LLM.
+
+This separation keeps the high-level orchestration flow distinct from the low-level server-side agent execution and LLM interaction logic. UI updates are often triggered within the client-side loop in the mode file after receiving results from the server actions.
+

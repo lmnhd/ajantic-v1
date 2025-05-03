@@ -2,15 +2,9 @@ import React, { useEffect } from "react";
 
 import ReferenceStateView from "@/components/global/reference-stateview";
 import { useGlobalStore } from "@/src/lib/store/GloabalStoreState";
-import { LineLyricType } from "@/components/songeditor/lyric/line";
+
 import { cn, UTILS_getGenericData, UTILS_putGenericData } from "@/src/lib/utils";
-import { ExitIcon, PlusCircledIcon } from "@radix-ui/react-icons";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+
 
 import {
   Select,
@@ -85,7 +79,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ModelProviderSelect } from "@/components/global/model-provider-select";
-import { AutoPromptData } from "./agentcomponentframework";
+import { AutoPromptData } from "./teams/ac_framework";
 
 const PromptWindowControl = ({
   localStateObject,

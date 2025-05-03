@@ -43,7 +43,7 @@ import { useLogger } from "@/src/lib/hooks/useLogger";
 import { CONVERSATION_store, formatDayName } from "@/src/lib/conversation";
 import { ORCHESTRATION_PAUSE_resetAllFlags } from "@/src/lib/workflow/functions/message-handlers/orchestrated-chat/pause-chat";
 
-import { AutoGenTeam } from "@/src/lib/autogen/autogen";
+import { AutoGenTeam } from "@/src/lib/autogen/autogen-types";
 import AutogenComponent, { defaultProcess } from "@/components/teams/autogen_component";
 import { TeamConfig } from "@/components/teams/TeamConfig";
 import { useFullscreen } from "@/src/lib/hooks/useFullscreen";
@@ -56,22 +56,12 @@ export default function TeamsPage() {
   const { updateNavbar, resetNavbar } = useNavbarStore();
   const { appState, setGlobalMessages, setAppState } = useGlobalStore();
   const { isLoaded, user, isSignedIn } = useUser();
-  // const [autoGenWorkflow, setAutoGenWorkflow] = useState<AutoGenTeam | null>(
-  //   null
-  // );
-
-  //const [pauseWaiting, setPauseWaiting] = useState(false);
-  const [orchStatus, setOrchStatus] = useState<"paused" | "runone" | "free">(
-    "free"
-  );
-
   const {
     agentActive,
     agentGlobalChatInput,
     agentGlobalChatInputChanged,
     changeIndex,
     changeMessageHistory,
-    contextSet,
     contextSetStore,
     converationsForDay,
     conversationHistory,
@@ -90,8 +80,6 @@ export default function TeamsPage() {
     handlePromptTextToSet,
     handleSaveContextSet,
     handleOrchestratedChatSubmit,
-    initialize,
-    isInitialized,
     isLoading,
     loadAgent,
     localState,
@@ -125,11 +113,11 @@ export default function TeamsPage() {
     setOrchestrationMode,
     customAgentSet,
     setCustomAgentSet,
+    isInitialized
   }: AnalysisState = useAnalysisStore();
 
   const { messages: logMessages, clear: clearLogMessages } = useLogger();
   const [fullscreenRef, toggleFullscreen, isFullscreen] = useFullscreen();
-
 
   // State management for the automation workflow
   // Process to automate as described by the user
@@ -161,10 +149,12 @@ export default function TeamsPage() {
   // Add state to track if workflow has been modified since last save
   const [workflowModified, setWorkflowModified] = useState(false);
 
-
+  const [orchStatus, setOrchStatus] = useState<"paused" | "runone" | "free">(
+    "free"
+  );
 
   useEffect(() => {
-    // Update navbar when component mounts
+    // This useEffect is ONLY for the Navbar update/reset
     updateNavbar({
       type: "minimized",
       title: "halimede",
@@ -176,79 +166,20 @@ export default function TeamsPage() {
         { letter: "d", color: "text-pink-500", index: 6 },
       ],
     });
-
-    // Initialize analysis store
-    const initStore = async () => {
-      try {
-        // Wait for user ID to be available
-        if (!isInitialized && appState.currentUser?.id) {
-          const userId = appState.currentUser.id;
-          await initialize(userId);
-          await loadEssentialData(userId);
-          await megaLoadStateFromBrowserOrServer();
-        }
-      } catch (error) {
-        console.error("Failed to initialize analysis store:", error);
-      }
-    };
-
-    initStore();
-
-    // Reset navbar when component unmounts
     return () => {
       resetNavbar();
     };
-  }, [
-    initialize,
-    isInitialized,
-    loadEssentialData,
-    megaLoadStateFromBrowserOrServer,
-    appState.currentUser?.id,
-    isLoaded,
-  ]);
-
-  useEffect(() => {
-    console.log("Initializing...", appState.currentUser, user, isInitialized);
-    // setInitilized(true)
-    // return;
-    if (!appState || appState.currentUser) return;
-    if (!user || !user.username) return;
-
-    const start = async () => {
-      if (!appState.currentUser && user.id) {
-        // Only initialize user-specific data
-        console.log("Initializing...", user.id);
-        setGlobalMessages({
-          ...__initAIState(),
-          currentState: {
-            ...__initAIState().currentState,
-            userId: user.id,
-            genericData: {
-              userName: user.username,
-              INIT_DONE: 1,
-            },
-          },
-        });
-        setAppState({ ...__initAppState(), currentUser: user });
-        await INDEXEDDB_initDB();
-
-        // Initialize analysis store with user ID
-
-        console.log("Initializing analysis store...", user.id);
-        await initialize(user.id);
-      }
-    };
-    if (!isInitialized) start();
-  }, [user]);
+  }, [updateNavbar, resetNavbar]); // Only navbar dependencies
 
   useEffect(() => {
     if (isLoaded && user && !appState.currentUser) {
+       console.log("[TeamsPage Sync User] Syncing Clerk user to global AppState");
       setAppState({ ...appState, currentUser: user });
     }
   }, [isLoaded, user, appState, setAppState]);
 
-  // Add diagnostic logging for troubleshooting
   useEffect(() => {
+    // Add diagnostic logging for troubleshooting
     console.log("Teams Page - Current Orchestration State:", {
       orchestrationMode,
       agentOrder,
@@ -284,30 +215,14 @@ export default function TeamsPage() {
     isInitialized,
   ]);
 
-  if (!isLoaded) {
-    return <div>Loading authentication state...</div>;
+  if (!isLoaded || !isSignedIn) {
+    return <div>Loading authentication state or not signed in...</div>;
   }
 
-  if (!isSignedIn) {
-    return <div>Please sign in to access teams</div>;
-  }
-
-  // Add loading state handling
-  if (!appState.currentUser?.id) {
-    return (
+  if (!isInitialized) {
+     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-500">Waiting for user authentication...</div>
-      </div>
-    );
-  }
-
-  if (
-    !isInitialized ||
-    (isLoading && localState.currentAgents.agents.length === 0)
-  ) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-500">Loading...</div>
+        <div className="text-gray-500">Initializing application state...</div>
       </div>
     );
   }
@@ -475,7 +390,7 @@ export default function TeamsPage() {
                         messages: ServerMessage[] | Message[] | ClientMessage[] | HumanMessage[] | AIMessage[]
                       ) => void}
                       stateLoaded={stateLoaded}
-                      contextSet={contextSet}
+                      contextSet={localState.contextSet}
                       currentAgentIndex={currentAgentIndex}
                       handleChangeIndex={handleChangeIndex}
                       loadAgent={loadAgent}
@@ -551,7 +466,7 @@ export default function TeamsPage() {
                       className="bg-slate-800 h-[calc(100vh-10rem)] p-1 overflow-y-auto relative z-10"
                     >
                       <ContextSetComponent
-                        inputContextSet={contextSet}
+                        inputContextSet={localState.contextSet}
                         currentContextSetItem={currentContextSetItem}
                         setCurrentContextSetItem={setCurrentContextSetItem}
                         allAgents={localState.currentAgents.agents}
@@ -697,7 +612,7 @@ export default function TeamsPage() {
                 console.log("Current custom agent set:", customAgentSet);
                 console.log("Current local state:", localState);
                 console.log("Current server messages:", currentConversation);
-                console.log("Current context set:", contextSet);
+                console.log("Current context set:", localState.contextSet);
                 console.log("Current context set store:", contextSetStore);
                 console.log("Curent Agent Index: ", currentAgentIndex);
                 console.log("Agent Active: ", agentActive);

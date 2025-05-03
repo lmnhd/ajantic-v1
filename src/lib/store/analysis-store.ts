@@ -135,12 +135,10 @@ export interface AnalysisState {
   setOrchestrationMode: (mode: OrchestrationType2) => void;
   setCustomAgentSet: (agents: string[]) => void;
 
-  contextSet: ContextSet;
   currentAgentIndex: number;
   currentContextSetItem: number;
   setCurrentContextSetItem: (index: number) => void;
   contextSetStore: { id: number; teamName: string }[];
-
 
   // Autogen state
   handleTeamAutoGen: (props: AutoGenWorkflowProps) => Promise<AutoGenWorkflowProps>;
@@ -176,9 +174,6 @@ export interface AnalysisState {
   updateMessages: (messages: ServerMessage[]) => void;
   handleClearMessages: () => void;
   setMessageHistory: (dayName: string) => void;
-
-  // Context operations
-  setContextSet: (contextSet: ContextSet) => void;
 
   // Actions
   setCurrentAgentIndex: (index: number) => void;
@@ -219,6 +214,15 @@ export interface AnalysisState {
 
   handleDeleteContextSet: (id: number) => Promise<void>;
   handleDeleteMultipleContextSets: (ids: number[]) => Promise<void>;
+
+  // New actions
+  updateContextSet: (updates: Partial<ContextSet>) => void;
+  addContextContainer: () => void;
+  updateContextContainer: (index: number, updates: Partial<ContextContainerProps>) => void;
+  deleteContextContainer: (index: number) => void;
+  toggleAgentVisibility: (agentName: string, index: number, allAgentNames: string[], soloInstead?: boolean) => void;
+  shiftContextContainer: (index: number, direction: "up" | "down") => void;
+  clearContextText: (index: number) => void;
 }
 
 export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisState => ({
@@ -309,10 +313,11 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
             sets: result.resultContext || []
           }
         },
-        contextSet: {
-          teamName: result.resultTeam.name,
-          sets: result.resultContext || []
-        },
+        // Remove this line
+        // contextSet: {
+        //   teamName: result.resultTeam.name,
+        //   sets: result.resultContext || []
+        // },
         // Set orchestration mode from the team
         orchestrationMode: result.resultTeam.orchestrationType || OrchestrationType2.SEQUENTIAL_WORKFLOW,
         // Reset the agent set to include all agents
@@ -330,7 +335,6 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
   },
 
   currentConversation: [],
-  contextSet: { sets: [] as ContextContainerProps[], teamName: "Default Team" },
   currentAgentIndex: 0,
   currentContextSetItem: 0,
 
@@ -622,7 +626,230 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
     await handleDeleteMultipleContextSets(ids, get, set),
 
   // Context operations
-  setContextSet: (contextSet: ContextSet) => set({ contextSet }),
+  updateContextSet: (updates: Partial<ContextSet>) => {
+    set(state => {
+      if (!state.localState.contextSet) return state;
+      
+      // Check if sets are actually changing before updating
+      if (updates.sets) {
+        // If the sets being updated are identical to current sets, don't trigger update
+        if (state.localState.contextSet.sets && 
+            JSON.stringify(state.localState.contextSet.sets) === JSON.stringify(updates.sets)) {
+          // If there are other properties besides sets, update only those
+          const { sets, ...otherUpdates } = updates;
+          if (Object.keys(otherUpdates).length === 0) {
+            return state; // No changes at all
+          }
+          
+          // Update only non-sets properties
+          return {
+            ...state,
+            localState: {
+              ...state.localState,
+              contextSet: {
+                ...state.localState.contextSet,
+                ...otherUpdates
+              }
+            }
+          };
+        }
+      }
+      
+      // Normal update with changes
+      return {
+        ...state,
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            ...updates
+          }
+        }
+      };
+    });
+  },
+
+  addContextContainer: () => {
+    set(state => {
+      if (!state.localState.contextSet) return state;
+      
+      const newSet: ContextContainerProps = {
+        setName: `Set ${(state.localState.contextSet.sets?.length ?? 0) + 1}`,
+        lines: [],
+        text: "",
+        isDisabled: false,
+        hiddenFromAgents: []
+      };
+      
+      // Get updated sets arrays
+      const updatedLocalStateSets = [...(state.localState.contextSet.sets || []), newSet];
+      
+      return {
+        ...state,
+        // Always update nested contextSet
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            sets: updatedLocalStateSets
+          }
+        }
+      };
+    });
+  },
+
+  updateContextContainer: (index: number, updates: Partial<ContextContainerProps>) => {
+    set(state => {
+      if (!state.localState.contextSet?.sets || index < 0 || index >= state.localState.contextSet.sets.length) {
+        return state;
+      }
+      
+      // Add identity check to prevent unnecessary updates
+      const currentSet = state.localState.contextSet.sets[index];
+      const updatedSet = { ...currentSet, ...updates };
+      
+      // Check if any actual changes happened
+      let hasChanges = false;
+      for (const key in updates) {
+        if (JSON.stringify(currentSet[key as keyof ContextContainerProps]) !== 
+            JSON.stringify(updates[key as keyof ContextContainerProps])) {
+          hasChanges = true;
+          break;
+        }
+      }
+      
+      // If nothing changed, return same state to prevent rerender
+      if (!hasChanges) {
+        return state;
+      }
+      
+      const updatedSets = [...state.localState.contextSet.sets];
+      updatedSets[index] = updatedSet;
+      
+      return {
+        ...state,
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            sets: updatedSets
+          }
+        }
+      };
+    });
+  },
+
+  deleteContextContainer: (index: number) => {
+    console.log("Store deleteContextContainer called with index:", index);
+    set(state => {
+      // Exit if no contextSet in localState
+      if (!state.localState.contextSet?.sets) {
+        console.error("No contextSet or sets found in state");
+        return state;
+      }
+      
+      // Create new arrays without the item at the specified index
+      const updatedLocalStateSets = state.localState.contextSet.sets.filter((_, i) => i !== index);
+      
+      console.log(`Updating both context sets:
+        - localState.contextSet.sets: ${state.localState.contextSet.sets.length} -> ${updatedLocalStateSets.length}`);
+      
+      // Return updated state with both context sets updated
+      return {
+        ...state,
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            sets: updatedLocalStateSets
+          }
+        }
+      };
+    });
+  },
+
+  toggleAgentVisibility: (agentName: string, index: number, allAgentNames: string[], soloInstead?: boolean) => {
+    set(state => {
+      if (!state.localState.contextSet?.sets) return state;
+      
+      const updatedSets = state.localState.contextSet.sets.map((set, i) => {
+        if (i !== index) return set;
+        
+        let hiddenFromAgents = set.hiddenFromAgents || [];
+        
+        if (soloInstead) {
+          // Only show to this agent (hide from all others)
+          hiddenFromAgents = allAgentNames.filter(a => a !== agentName);
+        } else {
+          // Toggle this agent's visibility
+          const isHidden = hiddenFromAgents.includes(agentName);
+          hiddenFromAgents = isHidden
+            ? hiddenFromAgents.filter(a => a !== agentName)
+            : [...hiddenFromAgents, agentName];
+        }
+        
+        return { ...set, hiddenFromAgents };
+      });
+      
+      return {
+        ...state,
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            sets: updatedSets
+          }
+        }
+      };
+    });
+  },
+
+  shiftContextContainer: (index: number, direction: "up" | "down") => {
+    set(state => {
+      if (!state.localState.contextSet?.sets) return state;
+      const sets = state.localState.contextSet.sets;
+      
+      if (direction === "up" && index === 0) return state;
+      if (direction === "down" && index === sets.length - 1) return state;
+      
+      const newSets = [...sets];
+      const [movedSet] = newSets.splice(index, 1);
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      newSets.splice(targetIndex, 0, movedSet);
+      
+      return {
+        ...state,
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            sets: newSets
+          }
+        }
+      };
+    });
+  },
+
+  clearContextText: (index: number) => {
+    set(state => {
+      if (!state.localState.contextSet?.sets) return state;
+      
+      const updatedSets = state.localState.contextSet.sets.map((set, i) =>
+        i === index ? { ...set, text: "" } : set
+      );
+      
+      return {
+        ...state,
+        localState: {
+          ...state.localState,
+          contextSet: {
+            ...state.localState.contextSet,
+            sets: updatedSets
+          }
+        }
+      };
+    });
+  },
 }));
 
 // If in browser context, expose the store globally for direct access
