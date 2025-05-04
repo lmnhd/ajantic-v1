@@ -1,0 +1,106 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Ajantic Framework Core Concepts & Architecture
+
+This document outlines the fundamental architecture, components, and design patterns of the Ajantic Agent Automation and Orchestration Framework. It synthesizes information from existing rules and core code files.
+
+## 1. High-Level Overview
+
+Ajantic is a multi-agent framework designed for complex task automation. It features:
+
+*   **Agent Teams:** Groups of specialized AI agents collaborating towards a common objective.
+*   **Orchestration:** Different modes for controlling agent interaction (e.g., sequential, manager-directed, LLM-routed).
+*   **Dynamic Tooling:** Supports standard tools, user-generated custom tools, and runtime scraping helpers.
+*   **Context Management:** A sophisticated system for managing shared information (context sets) between agents and the user.
+*   **State Management:** Utilizes Zustand for client-side state, with specific patterns for syncing client and server perspectives, particularly for context.
+*   **Modular Design:** Separation between UI components, client-side orchestration logic, server-side agent execution, and tool implementations.
+
+## 2. Core Components
+
+*   **Agents (`AgentComponentProps`):** Individual AI units with defined roles, skills (prompts), models (`ModelArgs`), tools, and directives. Key types include `WORKER` and `MANAGER`.
+*   **Teams (`Team`):** Define a collection of agents, their objectives, and potentially default orchestration settings. Managed via `analysis-store.ts` and server actions.
+*   **Orchestrator:** The logic layer that controls the flow of interaction between agents based on the selected `OrchestrationType2`. Resides partly client-side (looping logic in orchestration mode files like `manager-directed.ts`) and partly server-side (agent execution logic).
+*   **Tool Registry (`ToolRegistry`):** Manages the persistence and retrieval of custom tool definitions (see `src/lib/agent-tools/tool-registry/registry.ts`).
+*   **State Store (`useAnalysisStore`):** The central Zustand store (`src/lib/store/analysis-store.ts`) managing UI state, application state (`AISessionState`), messages, agent configurations, context sets, and orchestration settings.
+
+## 3. State Management (`analysis-store.ts`)
+
+*   **Zustand:** The primary client-side state management library.
+*   **`localState` (`AISessionState`):** Holds the core application state, including user info, agent/team configurations, context sets, and orchestration settings. This is the primary object persisted and loaded.
+*   **Dual Context State:** Critically, context sets are managed in two places within the store for potentially legacy reasons or client/server sync needs:
+    *   `localState.contextSet`: Nested within the main state object. Server updates primarily target this.
+    *   Top-level `contextSet`: Seems deprecated or for specific UI components (Needs verification). **All store actions are intended to keep these synchronized.**
+*   **Persistence:**
+    *   `saveState`: Saves `localState` to IndexedDB.
+    *   `saveGlobalState`/`loadFrozenGlobalState`: Persists/loads snapshots of the entire `localState` to/from the database (`AppFrozenState`).
+    *   Agent/Team/Context Set Definitions: Saved individually to the database via specific actions (`saveAgentState`, `handleSaveContextSet`, etc.).
+*   **Orchestration Settings:** Managed directly within the Zustand store (`agentOrder`, `rounds`, `maxRounds`, `orchestrationMode`, `customAgentSet`) and persisted via `saveState` within `localState`.
+*   **Agent Disabling:** Agent `disabled` state is dynamically calculated and updated within the store based on the current `orchestrationMode` and `customAgentSet`.
+
+## 4. Orchestration Flow
+
+*   **Modes (`OrchestrationType2`):** Define how agents interact (e.g., `DIRECT_AGENT_INTERACTION`, `SEQUENTIAL_WORKFLOW`, `MANAGER_DIRECTED_WORKFLOW`, `LLM_ROUTED_WORKFLOW`). Selected via UI and stored in `analysis-store`.
+*   **Client-Side Control Loop:** Orchestration modes often run a loop on the client (e.g., in `src/lib/orchestration/modes/*.ts`).
+*   **Server-Side Execution (`agent-execution.ts`):** Client loops call server actions (`"use server"`):
+    *   `ORCHESTRATION_executeAgentTurn`: For worker agents. Uses Vercel AI SDK `generateText`. Handles multi-step tool calls via `maxSteps`. Includes optional validation (`_validateWorkerResponse`).
+    *   `ORCHESTRATION_executeManagerTurn`: For manager agents. Uses Vercel AI SDK `generateObject` to get structured directives (next agent, context updates, etc.).
+*   **Prompt Generation:** Dynamically generated based on agent, context, and orchestration mode (see `orchestration-prompt*.ts`).
+*   **Task Loop Pattern:** For complex tasks involving multiple tool calls (esp. scraping), agents plan sub-tasks, and the orchestrator executes them iteratively to manage token limits (see `agent_tool_orchestration` rule).
+
+## 5. Tool System
+
+*   **Standard Tools:** Pre-defined tools available to agents (e.g., `agentGlobalState`, `agentDiary`, `urlScrape`, `pinecone`, `perplexity2`, `s3Store`, `database`).
+*   **Custom Tools:** User-defined tools created and managed via the Playground (`src/app/playground/custom-tool/page.tsx`).
+    *   **Generation:** Uses `CORE_generateCustomToolDefinition` (`auto-gen-tool_core.ts`) with `generateObject` and context-aware prompts. Can be informed by the "Scraper Consultant" workflow.
+    *   **Registry:** Stored in the database via `ToolRegistry`.
+    *   **User-Scoped:** Custom tools belong to a user (`userId`) and are available to all agents run by that user (recent refactor removing `agentId`).
+*   **Loading (`ORCHESTRATION_load_agent_tools`):** Unified function to load both standard and relevant custom tools for an agent turn. Uses `loadToolsAndBuildRegistry` and `CORE_generateDynamicToolWrapper`.
+*   **Execution:** Tools are executed server-side within the `generateText`/`generateObject` calls.
+*   **Scraping Tools (`url-scrape*.ts`):** Specific tools like `scrapeAndQueryUrl` (preferred for targeted info using embeddings) and `scrapeAndSummarizeUrl`. Implement a once-per-turn execution limit for data-intensive scraping tools.
+*   **Runtime Helpers (`runtime-scraping-helpers` rule):** Reusable functions (e.g., in `src/lib/agent-tools/helpers/`) for complex tasks like Firecrawl or visual scraping. These are *imported and called by the generated code* of custom tools.
+*   **Browser Automation (`puppeteer-client` rule):** Client library (`src/lib/puppeteer_client.ts`) handles interaction with local Puppeteer or Browserbase service for advanced scraping needs.
+
+## 6. Context Set Management (`context-sets` rule & `analysis-store.ts`)
+
+*   **Structure (`ContextContainerProps`, `ContextSet`):** Defines named sets containing text, lines, visibility rules (`hiddenFromAgents`), and optional form schemas. Grouped under a `teamName`.
+*   **Dual State Sync:** Store actions (`addContextContainer`, `updateContextContainer`, `deleteContextContainer`, etc.) explicitly update *both* `localState.contextSet` and the top-level `contextSet`. **This is crucial for consistency.**
+*   **Server Updates:** Primarily driven by `MANAGER` agents via `agentDirectives.contextSetUpdate` in `ORCHESTRATION_executeManagerTurn`. Empty context implies deletion.
+*   **Client Merging:** `updateLocalState` merges incoming server context with the client state, carefully preserving client-side `isDisabled` states *unless* the set was explicitly deleted by the server.
+*   **CRUD Operations:** Handled via store actions, ensuring immutable updates and state synchronization. Database persistence handled separately (`handleSaveContextSet`, `handleDeleteContextSet`).
+*   **Identity Checks:** Store actions include checks to prevent unnecessary updates if content hasn't changed, optimizing performance.
+
+## 7. UI Layer
+
+*   **Teams Page (`src/app/teams/page.tsx`):** Main dashboard for interacting with agent teams, viewing chats, managing context, configuring orchestration, and viewing logs. Uses `ResizablePanelGroup` for layout.
+*   **Custom Tool Playground (`src/app/playground/custom-tool/page.tsx`):** Interface for creating, testing, generating, and managing custom tools. Includes the "Scraper Consultant" helper.
+*   **Components:** Reusable UI components likely reside in `components/ui` and `components/global`. Uses Shadcn UI components.
+*   **Design System (`design-system` rule):** Defines the look and feel using TailwindCSS utility classes (Slate, Indigo/Purple/Blue/Teal accents, specific typography, card styles).
+
+## 8. Backend / API
+
+*   **Server Actions (`"use server"`):** Encapsulate server-side logic callable directly from client components (e.g., `agent-execution.ts`, `agent-channels.tsx`). Subject to constraints (only async function exports).
+*   **API Routes (`src/app/api/...`):** Standard Next.js API routes handle requests from the frontend, particularly for the playground (e.g., `/api/playground/generate-tool-definition`, `/api/playground/analyze-scraping`).
+
+## 9. Conventions
+
+*   **`"use server"`:** Files with this directive require non-function exports (types, constants, schemas) to be defined in separate, non-`"use server"` files (see `use-server-conventions` rule).
+*   **Naming:** Functions related to core orchestration often prefixed with `ORCHESTRATION_`. Tool-related functions with `AGENT_TOOLS_` or `CORE_`. Store actions often use `handle` prefix.
+
+## 10. Open Questions & Areas for Clarification
+
+*   **Dual Context State Purpose:** What is the definitive reason for maintaining `contextSet` both at the top level and within `localState`? Is the top-level one planned for removal? Which UI components rely on which?
+*   **`agent-channels.tsx` Role:** This file contains `basicAgentChat` and `agentToAgentChat`. How does it fit into the primary orchestration flow defined in `agent-execution.ts` and the mode files? Is it for a specific type of interaction or older code?
+*   **Detailed Error Handling:** How are errors from LLM calls, tool executions, and orchestration logic systematically handled and propagated to the UI?
+*   **Vector Store Usage:** Beyond `scrapeAndQueryUrl`, how is the `MemoryVectorStore` or `GLOBAL_getVectorStoreClient` utilized within the broader agent workflow (e.g., long-term memory, RAG)?
+*   **AutoGen Workflow Integration:** The `handleTeamAutoGen` action exists in the store. How is the resulting `AutoGenTeam` configuration fully utilized by the standard orchestration modes after creation?
+*   **`TextChatLogProps` Usage:** This type is deprecated and being replaced by the WebSocket-based `Logger` hook. How were the logs originally intended to be used or displayed?
+*   **Security & Authorization:** How is user authorization enforced across server actions and API routes, especially concerning access to tools, context sets, and agent states? (Beyond passing `userId`).
+*   **Scalability Considerations:** Are there specific strategies in place for handling a large number of concurrent users or very long-running agent workflows?
+*   **Testing Strategy:** What is the approach for unit, integration, and end-to-end testing of the agent and orchestration logic?
+
+
+
+This summary provides a starting point. It should be continuously updated as the framework evolves and these open questions are addressed.

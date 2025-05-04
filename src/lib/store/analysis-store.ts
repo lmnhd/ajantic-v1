@@ -69,7 +69,8 @@ import { handleAgentChatSubmit } from "../workflow/functions/message-handlers/ag
 import { handleOrchestratedChatSubmit } from "../workflow/functions/message-handlers/orchestrated-chat";
 
 import { APP_FROZEN_getById } from "@/src/lib/app-frozen";
-import { AutoGenWorkflowProps, TEAM_autogen_create_workflow } from "@/src/lib/autogen/autogen";
+import { TEAM_autogen_create_workflow } from "@/src/lib/autogen/autogen";
+import { AutoGenWorkflowProps } from "../autogen/autogen-types";
 
 // Helper function to calculate agent disabled states based on orchestration settings
 const updateAgentDisabledStates = (
