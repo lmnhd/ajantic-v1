@@ -16,7 +16,7 @@ import { GeneralPurpose } from "@prisma/client";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { UTILS_getModelArgsByName } from "@/src/lib/utils";
 import { UTILS_getModelsJSON } from "@/src/lib/utils";
-import { PERPLEXITY_getResponse } from "../../perplexity";
+import { PERPLEXITY_getResponse } from "../../perplexity2/perplexity";
 // Interface defining the properties needed for auth tool optimization
 export interface AuthToolOptimizerProps {
   platform: string; // The OAuth platform (e.g., Google, GitHub)

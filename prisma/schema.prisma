@@ -31,6 +31,7 @@ model User {
   fName                   String?
   lName                   String?
   LocalGoogleCredential   LocalGoogleCredential?
+  credentials             UserCredential[]
 }
 
 model LocalGoogleCredential {
@@ -253,18 +254,32 @@ model AgentComponent {
 }
 
 model CustomTool {
-  id                String   @id @default(cuid())
-  userId            String
-  name              String
-  description       String
-  parameters        String   // JSON string
-  implementation    String   // Code or endpoint
+  id                 String   @id @default(cuid())
+  userId             String
+  name               String
+  description        String
+  parameters         String   // JSON string
+  implementation     String   // Code or endpoint or JSON like {"endpoint": "..."}
   implementationType String   @default("function")
-  metadata          String   // JSON string with agentId, userId, etc.
-  version           Int      @default(1)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  metadata           String   // JSON string
+  version            Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([name])
   @@unique([userId, name])
+}
+
+model UserCredential {
+  id             String   @id @default(cuid())
+  userId         Int
+  credentialName String
+  encryptedValue String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, credentialName])
+  @@index([userId])
 }

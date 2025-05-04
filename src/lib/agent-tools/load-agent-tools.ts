@@ -32,7 +32,7 @@ import { logger } from "@/src/lib/logger";
 import { AGENT_TOOLS_database } from "./database-tool/database-tool";
 import { AGENT_TOOLS_knowledgeBase } from "./knowledgebase-tool/kb-tool";
 import { AGENT_TOOLS_documentProcessor } from "./documents-tools/document-processor";
-import { AGENT_TOOLS_perplexity2 } from "./perplexity2";
+import { AGENT_TOOLS_perplexity2 } from "./perplexity2/perplexity2";
 export const LOAD_AGENT_TOOLS = (
   toolNames: AI_Agent_Tools[] | string[],
   loadedTools: any = {},

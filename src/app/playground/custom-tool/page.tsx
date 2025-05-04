@@ -17,13 +17,14 @@ import { ToolListItem, ToolDefinitionResponse, ToolExecutionResponse, ToolCreati
 import { useAnalysisStore } from '@/src/lib/store/analysis-store';
 import { MODEL_JSON, UTILS_getModelArgsByName } from '@/src/lib/utils';
 import { z } from 'zod'; // Import z for schema definition in helper
+import { AnalysisResult } from '../../api/playground/analyze-scraping/_types';
+import { Separator } from '@/components/ui/separator'; // Import Separator for visual division
+import { ScrollArea } from '@/components/ui/scroll-area'; // Import ScrollArea for results
 
 // --- Adapter Functions ---
 const adaptProviderToEnumCase = (provider: ModelProviderEnum): string => {
-    // Map Enum type to the string value the component SelectItem expects (UPPERCASE)
-    return String(provider).toUpperCase(); // Convert enum member name/value to UPPERCASE string
+    return String(provider).toUpperCase();
 };
-
 // --- End Adapter Functions ---
 
 export default function CustomToolPage() {
@@ -35,44 +36,43 @@ export default function CustomToolPage() {
   // --- State for Tool Execution Section ---
   const [toolRef, setToolRef] = useState<string>('');
   const [result, setResult] = useState<string | null>(null);
-  const [execError, setExecError] = useState<string | null>(null); // Renamed for clarity
-  const [isExecuting, setIsExecuting] = useState<boolean>(false); // Renamed for clarity
+  const [execError, setExecError] = useState<string | null>(null);
+  const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [toolList, setToolList] = useState<ToolListItem[]>([]);
   const [isListLoading, setIsListLoading] = useState<boolean>(true);
   const [selectedToolDetails, setSelectedToolDetails] = useState<ToolDetails | null>(null);
   const [isDetailsLoading, setIsDetailsLoading] = useState<boolean>(false);
   const [formValues, setFormValues] = useState<Record<string, any>>({});
-  const [toolListError, setToolListError] = useState<string | null>(null); // Use a dedicated state for list errors
-  const [canExecute, setCanExecute] = useState<boolean>(false); // <-- New state for button disable logic
+  const [toolListError, setToolListError] = useState<string | null>(null);
+  const [canExecute, setCanExecute] = useState<boolean>(false);
 
   // --- State for Definition Generation Section ---
   const [genName, setGenName] = useState<string>('');
   const [genDescription, setGenDescription] = useState<string>('');
   const [genPurpose, setGenPurpose] = useState<string>('');
   const [genModifications, setGenModifications] = useState<string[]>([])
-  const [genInputs, setGenInputs] = useState<ToolInputParameter[]>([]); // ADD: State for structured inputs
+  const [genInputs, setGenInputs] = useState<ToolInputParameter[]>([]);
   const [genExpectedOutput, setGenExpectedOutput] = useState<string>('');
-  const [genCategory, setGenCategory] = useState<string>(''); // Optional
-  const [genAdditionalContext, setGenAdditionalContext] = useState<string>(''); // Optional
-  const [genExamplesJson, setGenExamplesJson] = useState<string>('[]'); // Optional
+  const [genCategory, setGenCategory] = useState<string>('');
+  const [genAdditionalContext, setGenAdditionalContext] = useState<string>('');
+  const [genExamplesJson, setGenExamplesJson] = useState<string>('[]');
   const [isGeneratingDef, setIsGeneratingDef] = useState<boolean>(false);
   const [genDefError, setGenDefError] = useState<string | null>(null);
   const [generatedDefinition, setGeneratedDefinition] = useState<GeneratedToolDefinition | null>(null);
 
    // --- State for Tool Creation Section ---
-   // Reuses most state from Definition Generation section
    const [isCreatingTool, setIsCreatingTool] = useState<boolean>(false);
    const [createToolError, setCreateToolError] = useState<string | null>(null);
    const [createToolSuccess, setCreateToolSuccess] = useState<string | null>(null);
-   const [isUpdatingTool, setIsUpdatingTool] = useState<boolean>(false); // New state for update
-   const [updateToolError, setUpdateToolError] = useState<string | null>(null); // New state for update error
-   const [updateToolSuccess, setUpdateToolSuccess] = useState<string | null>(null); // New state for update success
+   const [isUpdatingTool, setIsUpdatingTool] = useState<boolean>(false);
+   const [updateToolError, setUpdateToolError] = useState<string | null>(null);
+   const [updateToolSuccess, setUpdateToolSuccess] = useState<string | null>(null);
 
   // --- State for Quick Start Section ---
   const [quickStartName, setQuickStartName] = useState<string>('');
   const [quickStartDesc, setQuickStartDesc] = useState<string>('');
-  const [quickStartInputs, setQuickStartInputs] = useState<string>(''); // Simple string input for now
-  const [quickStartOutputs, setQuickStartOutputs] = useState<string>(''); // Simple string input for now
+  const [quickStartInputs, setQuickStartInputs] = useState<string>('');
+  const [quickStartOutputs, setQuickStartOutputs] = useState<string>('');
   const [isQuickStarting, setIsQuickStarting] = useState<boolean>(false);
   const [quickStartError, setQuickStartError] = useState<string | null>(null);
 
@@ -82,10 +82,17 @@ export default function CustomToolPage() {
   const [isRefining, setIsRefining] = useState<boolean>(false);
   const [refineError, setRefineError] = useState<string | null>(null);
 
- 
-
   // --- Restore ModelArgs STATE ---
   const [genModelArgs, setGenModelArgs] = useState<ModelArgs>(UTILS_getModelArgsByName(MODEL_JSON().OpenAI['gpt-4.5-preview'].name));
+
+  // --- State for Scraper Consultant ---
+  const [consultantUrl, setConsultantUrl] = useState<string>('');
+  const [consultantDataDesc, setConsultantDataDesc] = useState<string>('');
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  // --- End State for Scraper Consultant ---
+
 
   // Fetch the tool list on component mount
   useEffect(() => {
@@ -93,21 +100,15 @@ export default function CustomToolPage() {
     setToolListError(null);
 
     if (!userId) {
-      // User ID isn't ready yet. Don't fetch, don't set an error.
-      // The loading state might still be true initially, or set to false
-      // if we know userId is definitively missing (e.g., not logged in).
-      // For simplicity, we'll just prevent the fetch.
-      setIsListLoading(false); // Indicate we're not actively loading *tools*
-      setToolList([]);      // Ensure list is empty
+      setIsListLoading(false);
+      setToolList([]);
       console.log("User ID not available yet, skipping tool list fetch.");
-      return; // Stop the effect execution here
+      return;
     }
 
-    // If we reach here, userId is available, proceed with fetching.
     const fetchTools = async () => {
       setIsListLoading(true);
-      setToolListError(null); // Clear previous list errors before new fetch
-      // setExecError(null); // Keep execError separate for execution attempts
+      setToolListError(null);
       try {
         const response = await fetch(`/api/playground/list-custom-tools?userId=${encodeURIComponent(userId)}`);
         if (!response.ok) {
@@ -119,205 +120,154 @@ export default function CustomToolPage() {
         setToolList(data.tools);
       } catch (err) {
         console.error("Error fetching tool list:", err);
-        // Use the dedicated state for list errors
         setToolListError(err instanceof Error ? err.message : 'Failed to load tool list.');
-        setToolList([]); // Clear list on error
+        setToolList([]);
       } finally {
         setIsListLoading(false);
       }
     };
-
     fetchTools();
-  }, [userId]); // Dependency remains on userId
+  }, [userId]);
 
-  // Fetch tool details when toolRef changes
+  // Fetch tool details when toolRef changes AND update BOTH Execution & Definition forms
   useEffect(() => {
     const fetchToolDetails = async () => {
-      // Keep this clear for when generating NEW definitions later
-      // setGeneratedDefinition(null); // <-- Keep this if you want generation to override loaded view
-                                      // OR set based on fetched data below
-
-      // ... other state clears ...
-
+      // --- CLEAR ALL STATE if no toolRef ---
       if (!toolRef || toolRef === "placeholder" || toolRef === "no-tools") {
-        setSelectedToolDetails(null); setFormValues({});
-        // Reset generator form when no tool is selected
-        setGenName(''); setGenDescription(''); setGenPurpose('');
-        setGenInputs([]); setGenExpectedOutput('');
-        setGenCategory(''); setGenAdditionalContext(''); setGenExamplesJson('[]');
-        setGeneratedDefinition(null); // Clear implementation view too
+        setSelectedToolDetails(null);
+        setFormValues({});
+        setGenName('');
+        setGenDescription('');
+        setGenPurpose('');
+        setGenInputs([]);
+        setGenExpectedOutput('');
+        setGenCategory('');
+        setGenAdditionalContext('');
+        setGenExamplesJson('[]');
+        setGenModifications([]); // Keep modifications? Maybe clear them too.
+        setGeneratedDefinition(null);
+        setExecError(null); // Clear execution errors too
+        setResult(null);
+        // Do not clear proposedToolRequest here, handleClearTool does that
         return;
       }
 
-      if (!userId) { // Check if userId is available
+      // --- FETCH AND POPULATE if toolRef exists ---
+      if (!userId) {
           setExecError("User ID not found. Cannot load tool details.");
           setIsDetailsLoading(false);
-          setSelectedToolDetails(null); setFormValues({});
-          // Also reset generator form
-          setGenName(''); setGenDescription(''); setGenPurpose('');
-          setGenInputs([]); setGenExpectedOutput('');
-          setGenCategory(''); setGenAdditionalContext(''); setGenExamplesJson('[]');
-          setGeneratedDefinition(null);
+          // Clear fields if user ID disappears after selection? Maybe not needed.
           return;
       }
 
-      let toolId: string = ''; // <<< Declare toolId here
+      let toolId: string = toolRef.includes(':') ? toolRef.split(':')[1] : toolRef;
 
-      setIsDetailsLoading(true); setExecError(null); setFormValues({}); setSelectedToolDetails(null);
+      setIsDetailsLoading(true);
+      setExecError(null);
+      setResult(null);
+      setFormValues({}); // Clear execution form values before loading
+      setSelectedToolDetails(null); // Clear previous details
+
       try {
-        // --- Extract toolId ---
-        if (toolRef.includes(':')) {
-            toolId = toolRef.split(':')[1];
-        } else {
-            // Handle case where toolRef might not have the expected format (log or throw error)
-            console.warn(`Tool reference '${toolRef}' might not be in the expected CUSTOM_TOOL:id format.`);
-            toolId = toolRef; // Or handle as an error
-        }
-        // --- End extraction ---
-
         const response = await fetch(`/api/playground/tool-details?id=${encodeURIComponent(toolId)}&userId=${encodeURIComponent(userId)}`);
         if (!response.ok) {
            const errorData = await response.json().catch(() => ({ error: `Failed to fetch details: ${response.statusText}` }));
            throw new Error(errorData.error || `Failed to fetch details: ${response.statusText}`);
         }
         const data: ToolDetails = await response.json();
-        console.log('<<< RAW API Response for Tool Details: >>>', data); // <-- ADD CONSOLE LOG
 
-        // --- REVISED PARAMETER PARSING & VALIDATION --- 
-        let parsedInputs: any[] = []; // Start with any[] for parsing flexibility
-        if (data.parameters) {
-            if (typeof data.parameters === 'string') {
-                try {
-                    parsedInputs = JSON.parse(data.parameters);
-                    if (!Array.isArray(parsedInputs)) {
-                         console.warn("Parsed parameters string did not result in an array.");
-                         parsedInputs = []; // Default to empty if parse result isn't array
-                    }
-                } catch (e) {
-                    console.error("Failed to parse parameters JSON string:", e);
-                    // Don't throw here, just proceed with empty array
-                    parsedInputs = []; 
-                }
-            } else if (Array.isArray(data.parameters)) {
-                // It's already an array, use it directly
-                parsedInputs = data.parameters;
-            } else {
-                console.warn("Parameters field is neither a string nor an array.");
-                parsedInputs = []; // Default to empty array if unexpected type
-            }
-        }
+        // --- Process Parameters (used by both sections) ---
+        let parsedParameters: ToolInputParameter[] = [];
+         if (data.parameters) {
+             if (typeof data.parameters === 'string') {
+                 try {
+                     const parsed = JSON.parse(data.parameters);
+                     if (Array.isArray(parsed)) {
+                         const validationResult = z.array(z.object({ name: z.string(), type: z.enum(["string", "number", "boolean", "array", "object"]), description: z.string(), required: z.boolean().optional(), default: z.any().optional() })).safeParse(parsed);
+                         if (validationResult.success) parsedParameters = validationResult.data; else console.warn("Parsed parameters string did not match schema.", validationResult.error);
+                     } else { console.warn("Parsed parameters string was not an array."); }
+                 } catch (e) { console.error("Failed to parse parameters JSON string:", e); }
+             } else if (Array.isArray(data.parameters)) {
+                 const validationResult = z.array(z.object({ name: z.string(), type: z.enum(["string", "number", "boolean", "array", "object"]), description: z.string(), required: z.boolean().optional(), default: z.any().optional() })).safeParse(data.parameters);
+                 if (validationResult.success) parsedParameters = validationResult.data; else console.warn("Parameters array did not match schema.", validationResult.error);
+             } else { console.warn("Parameters field is neither a string nor an array."); }
+         }
+        // --- End Parameter Processing ---
 
-        // Now validate the parsedInputs array (which should be an array or [])
-        const validParameterTypes = ["string", "number", "boolean", "array", "object"];
-        const validatedInputs = parsedInputs.map((param): ToolInputParameter => {
-             // Ensure param is an object before accessing properties
-             if (typeof param !== 'object' || param === null) {
-                console.warn("Encountered non-object item during parameter validation, skipping.");
-                // Return a default valid structure or handle as error? For now, default.
-                return { name: 'parse_error', type: 'string', description: 'Invalid parameter structure found', required: false }; 
-            }
-            const paramType = typeof param.type === 'string' && validParameterTypes.includes(param.type) 
-                ? param.type as ToolInputParameter['type'] 
-                : 'string'; 
-            return {
-                // Provide fallbacks for potentially missing properties
-                name: param.name || 'unnamed_param',
-                type: paramType, 
-                description: param.description || '',
-                required: param.required ?? true,
-                default: param.default // Keep default as is
-            };
-        });
-        setGenInputs(validatedInputs);
-        // --- END REVISED LOGIC ---
+        // --- Set State for Execution Section (Section 1) ---
+        setSelectedToolDetails({ ...data, parameters: parsedParameters }); // Store details
+        const initialFormValues: Record<string, any> = {};
+        parsedParameters.forEach(param => { initialFormValues[param.name] = param.type === 'boolean' ? (param.default ?? false) : (param.default ?? ''); });
+        setFormValues(initialFormValues); // Set execution form values
 
-        setSelectedToolDetails({ ...data, parameters: validatedInputs });
-
-        // --- Populate Generator Form Fields ---
+        // --- Set State for Definition Section (Section 2) ---
         setGenName(data.name || '');
         setGenDescription(data.description || '');
         setGenPurpose(data.purpose || '');
         setGenExpectedOutput(data.expectedOutput || '');
+        setGenInputs(parsedParameters); // Use the same parsed parameters
         setGenCategory(data.metadata?.category || '');
         setGenAdditionalContext(data.metadata?.additionalContext || '');
         setGenExamplesJson(JSON.stringify(data.metadata?.examples || [], null, 2));
+        setGenModifications([]); // Clear modifications when loading a new tool
 
-        // --- FIX START: Populate implementation display state ---
         if (data.implementation) {
-            // Set the state used for displaying the implementation code
-            setGeneratedDefinition({
-                name: data.name || '', // Populate with fetched data
-                description: data.description || '',
-                parameters: validatedInputs, // Use 'parameters' key
-                expectedOutput: data.expectedOutput || '',
-                implementation: data.implementation // The fetched code
-            });
+          setGeneratedDefinition({
+            name: data.name || '',
+            description: data.description || '',
+            parameters: parsedParameters,
+            expectedOutput: data.expectedOutput || '',
+            implementation: data.implementation,
+          });
         } else {
-             // Clear display if no implementation was fetched
-             setGeneratedDefinition(null);
+          setGeneratedDefinition(null);
         }
-        // --- FIX END ---
-
-        // Initialize execution form values
-        const initialValues: Record<string, any> = {};
-        // Use validatedInputs here as well for consistency
-        validatedInputs.forEach(param => { initialValues[param.name] = param.type === 'boolean' ? (param.default ?? false) : (param.default ?? ''); });
-        setFormValues(initialValues);
+        // --- End Setting State for Section 2 ---
 
       } catch (err) {
-        console.error(`Error fetching details for tool ${toolId || toolRef}:`, err); // Use toolId or fallback to toolRef
+        console.error(`Error fetching details for tool ${toolId || toolRef}:`, err);
         setExecError(err instanceof Error ? err.message : `Failed to load details for ${toolRef}.`);
+        // Clear all fields on error
         setSelectedToolDetails(null);
         setFormValues({});
-        // Clear generator form on error too
-        setGenName(''); setGenDescription(''); setGenPurpose('');
-        setGenInputs([]); setGenExpectedOutput('');
-        setGenCategory(''); setGenAdditionalContext(''); setGenExamplesJson('[]');
-        setGeneratedDefinition(null); // Clear implementation on error too
+        setGenName(''); setGenDescription(''); setGenPurpose(''); setGenInputs([]);
+        setGenExpectedOutput(''); setGenCategory(''); setGenAdditionalContext('');
+        setGenExamplesJson('[]'); setGenModifications([]); setGeneratedDefinition(null);
       } finally {
         setIsDetailsLoading(false);
       }
     };
-
     fetchToolDetails();
-  }, [toolRef, userId]); // Re-run when toolRef changes
+  // Add ALL gen* state variables that are set inside to the dependency array
+  // Although technically they are only *set* here, adding them prevents potential
+  // stale closure issues if this hook were more complex. React lint rules might require it.
+  }, [
+      userId, toolRef,
+      // Add setters to dependencies is generally safe, but values aren't needed
+      // If ESLint complains, add the setters: setGenName, setGenDescription, etc.
+  ]);
 
-  // --- NEW EFFECT: Check if execution is possible based on required args ---
+  // Check if execution is possible based on required args
   useEffect(() => {
     if (!selectedToolDetails || !selectedToolDetails.parameters || selectedToolDetails.parameters.length === 0) {
-        // If no tool is selected or it has no parameters, execution is technically possible (or N/A)
         setCanExecute(true);
         return;
     }
-
-    // Check if all required parameters have a non-empty value
     const allRequiredFilled = selectedToolDetails.parameters.every(param => {
-        // Parameter is considered optional if required is explicitly false
         const isRequired = param.required !== false;
-        if (!isRequired) {
-            return true; // Optional parameters don't block execution
-        }
-
+        if (!isRequired) return true;
         const value = formValues[param.name];
-
-        // Check for empty: null, undefined, empty string. Allow 0 for numbers and false for booleans.
-        if (value === null || value === undefined || value === '') {
-            return false; // Required parameter is empty
-        }
-
-        return true; // Required parameter has a value
+        if (value === null || value === undefined || value === '') return false;
+        return true;
     });
-
     setCanExecute(allRequiredFilled);
-
-  }, [formValues, selectedToolDetails]); // Re-run when form values or selected tool details change
-  // --- END NEW EFFECT ---
+  }, [formValues, selectedToolDetails]);
 
   // Generic handler for input changes in the dynamic form
   const handleFormChange = useCallback((paramName: string, value: any, type: string) => {
     setFormValues(prev => ({
       ...prev,
-      [paramName]: type === 'number' ? Number(value) || 0 : value // Handle number conversion
+      [paramName]: type === 'number' ? Number(value) || 0 : value
     }));
   }, []);
 
@@ -354,7 +304,7 @@ export default function CustomToolPage() {
 
    // --- ADD HANDLER FUNCTIONS FOR MODIFICATIONS START ---
    const handleAddModification = useCallback(() => {
-       setGenModifications(prev => [...prev, '']); // Add empty string for new input
+       setGenModifications(prev => [...prev, '']);
    }, []);
 
    const handleRemoveModification = useCallback((index: number) => {
@@ -372,7 +322,7 @@ export default function CustomToolPage() {
 
   // --- ADD HANDLER FUNCTIONS FOR STRUCTURE MODIFICATIONS START ---
   const handleAddStructureModification = useCallback(() => {
-    setStructureModifications(prev => [...prev, '']); // Add empty string
+    setStructureModifications(prev => [...prev, '']);
   }, []);
 
   const handleRemoveStructureModification = useCallback((index: number) => {
@@ -389,22 +339,10 @@ export default function CustomToolPage() {
   // --- ADD HANDLER FUNCTIONS FOR STRUCTURE MODIFICATIONS END ---
 
   const handleExecute = async () => {
-    if (!userId || !canExecute) return; // Added !canExecute check
-    setIsExecuting(true);
-    setExecError(null);
-    setResult(null);
-
-    if (!selectedToolDetails) {
-         setExecError("No tool details loaded to execute.");
-         setIsExecuting(false);
-            return;
-        }
-
+    if (!userId || !canExecute || !selectedToolDetails) return;
+    setIsExecuting(true); setExecError(null); setResult(null);
     try {
-      // Use the formValues state directly
       const argsToSend = { ...formValues };
-
-      // Optional: Convert empty strings for numbers back to undefined or handle as needed by API
       selectedToolDetails.parameters.forEach(param => {
           if (param.type === 'number' && argsToSend[param.name] === '') {
                // Decide how to handle empty number fields: send 0, undefined, or keep as ''?
@@ -417,52 +355,24 @@ export default function CustomToolPage() {
                }
           }
       });
-
-
-      const response = await fetch('/api/playground/custom-tool', { // Ensure this API route exists
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            userId: userId, // Add userId
-            toolRef,
-            toolArgs: argsToSend
-        }), // Send structured form values
-      });
+      const response = await fetch('/api/playground/custom-tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, toolRef, toolArgs: argsToSend }) });
       const data = await response.json();
-      if (!response.ok) {
-        setExecError(data.error || `Request failed with status ${response.status}`);
-        if(data.details) console.error("Validation Details:", data.details);
-      } else {
-        setResult(JSON.stringify(data.result, null, 2));
-      }
-    } catch (err) {
-      console.error("API call failed:", err);
-      setExecError(err instanceof Error ? err.message : 'An unexpected error occurred.');
-    } finally {
-      setIsExecuting(false);
-    }
+      if (!response.ok) setExecError(data.error || `Request failed: ${response.status}`); else setResult(JSON.stringify(data.result, null, 2));
+    } catch (err) { setExecError(err instanceof Error ? err.message : 'API error.'); } finally { setIsExecuting(false); }
   };
 
-  const handleToolSelect = (value: string) => {
-      if (value === "no-tools" || value === "placeholder") {
-          setToolRef(''); // Clear ref if placeholder selected
-          return;
-      };
-      setToolRef(value);
-      setExecError(null);
-      setResult(null); // Clear errors/results on new selection
-  };
+  const handleToolSelect = useCallback((value: string) => {
+      if (value === "no-tools" || value === "placeholder") { setToolRef(''); return; };
+      setToolRef(value); setExecError(null); setResult(null);
+  }, []);
 
   // --- Restore ModelProviderSelect Handlers ---
   const handleModelProviderChange = useCallback((providerEnumFromComponent: string) => {
-    // The component callback gives the string value from the SelectItem,
-    // which corresponds to the enum member's string value (UPPERCASE)
-    const providerEnum = providerEnumFromComponent as ModelProviderEnum; // Cast the received string value to the enum type
+    const providerEnum = providerEnumFromComponent as ModelProviderEnum;
     const newModelName = UTILS_updateModelNameAfterProviderChange(providerEnum);
-
     setGenModelArgs(prevArgs => ({
         ...prevArgs,
-        provider: providerEnum, // Update state with the actual Enum type
+        provider: providerEnum,
         modelName: newModelName as ModelNames,
     }));
   }, []);
@@ -482,7 +392,6 @@ export default function CustomToolPage() {
   }, []);
 
   // --- NEW HELPER: Build Payload for Save/Update ---
-  // Defines the structure expected by the simplified Create/Update endpoints
   const savePayloadSchema = z.object({
       name: z.string().min(1),
       description: z.string().min(1),
@@ -490,7 +399,7 @@ export default function CustomToolPage() {
           name: z.string(), type: z.enum(["string", "number", "boolean", "array", "object"]),
           description: z.string(), required: z.boolean().optional(), default: z.any().optional()
       })),
-      implementation: z.string().min(1), // Implementation is required
+      implementation: z.string().min(1),
       purpose: z.string().optional(),
       expectedOutput: z.string().optional(),
       category: z.string().optional(),
@@ -499,7 +408,7 @@ export default function CustomToolPage() {
   });
   type SavePayload = z.infer<typeof savePayloadSchema>;
 
-  const buildSavePayload = (): SavePayload | null => {
+  const buildSavePayload = useCallback((): SavePayload | null => {
       const currentImplementation = generatedDefinition?.implementation;
       if (!currentImplementation) {
           const errorMsg = "No implementation code generated or loaded. Please generate or load an implementation first.";
@@ -507,180 +416,81 @@ export default function CustomToolPage() {
           setUpdateToolError(errorMsg);
           return null;
       }
-
-      // Validate basic required fields from form state
       if (!genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)) {
           const errorMsg = "Tool Name, Description, Expected Output, and all Parameter details (Name, Type, Description) are required before saving.";
           setCreateToolError(errorMsg);
           setUpdateToolError(errorMsg);
           return null;
       }
-
-      let examplesData: any[] | undefined = undefined;
-      try {
-          const parsedExamples = JSON.parse(genExamplesJson);
-          if (Array.isArray(parsedExamples)) { examplesData = parsedExamples; }
-      } catch (e) { console.warn("Could not parse examples JSON for save payload."); }
-
-      const payload: SavePayload = {
-          name: genName,
-          description: genDescription,
-          inputs: genInputs,
-          implementation: currentImplementation, // Include the implementation
-          purpose: genPurpose || genDescription,
-          expectedOutput: genExpectedOutput,
-          category: genCategory,
-          additionalContext: genAdditionalContext,
-          examples: examplesData,
-      };
-
-      // Validate the constructed payload
-      const validationResult = savePayloadSchema.safeParse(payload);
-      if (!validationResult.success) {
-          const errorMsg = "Payload validation failed before saving: " + JSON.stringify(validationResult.error.flatten());
-          setCreateToolError(errorMsg);
-          setUpdateToolError(errorMsg);
-          console.error("Save Payload Validation Error:", validationResult.error.flatten());
-          return null;
-      }
-
-      return validationResult.data; // Return the validated data
-  }
+      let examplesData: any[] | undefined = undefined; try { const parsed = JSON.parse(genExamplesJson); if (Array.isArray(parsed)) examplesData = parsed; } catch { /* warn */ }
+      const payload: SavePayload = { name: genName, description: genDescription, inputs: genInputs, implementation: currentImplementation, purpose: genPurpose || genDescription, expectedOutput: genExpectedOutput, category: genCategory, additionalContext: genAdditionalContext, examples: examplesData };
+      const validationResult = savePayloadSchema.safeParse(payload); if (!validationResult.success) { /* ... set error ... */ return null; }
+      return validationResult.data;
+  }, [generatedDefinition, genName, genDescription, genExpectedOutput, genInputs, genExamplesJson, genPurpose, genCategory, genAdditionalContext, setCreateToolError, setUpdateToolError]);
 
   // --- REFACTORED: Save as New Tool ---
-  const handleCreateTool = async () => {
+  const handleCreateTool = useCallback(async () => {
       if (!userId) { setCreateToolError("User ID not found."); return; }
       setIsCreatingTool(true); setCreateToolError(null); setCreateToolSuccess(null);
-      setGenDefError(null); setUpdateToolError(null); setUpdateToolSuccess(null); // Clear other statuses
-
-      const savePayload = buildSavePayload();
-      if (!savePayload) {
-          setIsCreatingTool(false);
-          return; // Error already set by buildSavePayload
-      }
-
-      const finalPayload = { ...savePayload, userId: userId }; // Add userId for the API
-
+      setGenDefError(null); setUpdateToolError(null); setUpdateToolSuccess(null);
+      const savePayload = buildSavePayload(); if (!savePayload) { setIsCreatingTool(false); return; }
+      const finalPayload = { ...savePayload, userId };
       try {
-          const response = await fetch('/api/playground/create-tool', { // Uses the direct create route
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(finalPayload),
-          });
+          const response = await fetch('/api/playground/create-tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(finalPayload) });
           const data = await response.json();
           if (!response.ok) {
-              setCreateToolError(data.error || `Request failed: ${response.status}`);
-              if (data.details) console.error("Validation:", data.details);
+              setCreateToolError(data.error || `Req failed: ${response.status}`);
           } else {
-              setCreateToolSuccess(data.message || 'Tool created successfully!');
-              setGeneratedDefinition(data.definition); // API returns the saved definition
-               // Optionally refresh tool list or select the new tool
-               // await fetchTools(); // Consider adding a fetchTools call here if needed
-               setToolRef(data.toolRef); // Select the newly created tool
+              setCreateToolSuccess(data.message || 'Created!');
+              setGeneratedDefinition(data.definition);
+              setToolRef(data.toolRef);
           }
-      } catch (err) { setCreateToolError(err instanceof Error ? err.message : 'API call failed.'); }
-      finally { setIsCreatingTool(false); }
-  };
+      } catch (err) { setCreateToolError(err instanceof Error ? err.message : 'API error.'); } finally { setIsCreatingTool(false); }
+  }, [userId, buildSavePayload]);
 
   // --- REFACTORED: Save Updates to Selected Tool ---
-  const handleUpdateTool = async () => {
-      if (!toolRef || toolRef === "placeholder" || toolRef === "no-tools") { setUpdateToolError("No existing tool selected."); return; }
+  const handleUpdateTool = useCallback(async () => {
+      if (!toolRef || toolRef === "placeholder" || toolRef === "no-tools") { setUpdateToolError("No tool selected."); return; }
       if (!userId) { setUpdateToolError("User ID not found."); return; }
       setIsUpdatingTool(true); setUpdateToolError(null); setUpdateToolSuccess(null);
-      setGenDefError(null); setCreateToolError(null); setCreateToolSuccess(null); // Clear other statuses
-
-      const savePayload = buildSavePayload();
-      if (!savePayload) {
-          setIsUpdatingTool(false);
-          return; // Error already set by buildSavePayload
-      }
-
-      const finalPayload = { ...savePayload, userId: userId }; // Add userId for the API
-
+      setGenDefError(null); setCreateToolError(null); setCreateToolSuccess(null);
+      const savePayload = buildSavePayload(); if (!savePayload) { setIsUpdatingTool(false); return; }
+      const finalPayload = { ...savePayload, userId };
       try {
-          const response = await fetch(`/api/playground/update-tool?ref=${encodeURIComponent(toolRef)}`, { // Uses the direct update route
-              method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(finalPayload),
-          });
+          const response = await fetch(`/api/playground/update-tool?ref=${encodeURIComponent(toolRef)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(finalPayload) });
           const data = await response.json();
           if (!response.ok) {
               setUpdateToolError(data.error || `Req failed: ${response.status}`);
-              if (data.details) console.error("Validation:", data.details);
           } else {
-              setUpdateToolSuccess(data.message || 'Tool updated!');
-              setGeneratedDefinition(data.definition); // API returns the updated definition
-               // Form fields are already updated via state, refresh if needed
-               // Consider re-fetching details if API doesn't return full new state
+              setUpdateToolSuccess(data.message || 'Updated!');
+              setGeneratedDefinition(data.definition);
           }
-      } catch (err) { setUpdateToolError(err instanceof Error ? err.message : 'API call failed.'); }
-      finally { setIsUpdatingTool(false); }
-  };
+      } catch (err) { setUpdateToolError(err instanceof Error ? err.message : 'API error.'); } finally { setIsUpdatingTool(false); }
+  }, [userId, toolRef, buildSavePayload]);
 
   // --- NEW HANDLER: Quick Start Tool --- 
-  const handleQuickStart = async () => {
-      if (!userId) { setQuickStartError("User ID not found."); return; } // Check userId
-      setIsQuickStarting(true);
-      setQuickStartError(null);
-      // Clear main form potentially?
-      // setGenName(''); setGenDescription(''); setGenPurpose('');
-      // setGenInputs([]); setGenExpectedOutput('');
-      // setGenModifications([]);
-      setGeneratedDefinition(null);
-      setGenDefError(null); setCreateToolError(null); setUpdateToolError(null);
-
-      // Basic validation
-      if (!quickStartName || !quickStartDesc || !quickStartInputs || !quickStartOutputs) {
+  const handleQuickStart = useCallback(async () => {
+      if (!userId || !quickStartName || !quickStartDesc || !quickStartInputs || !quickStartOutputs) {
           setQuickStartError("Please fill in all Quick Start fields.");
           setIsQuickStarting(false);
           return;
       }
-
-      const quickRequestData = {
-          userId: userId, // **** MODIFIED: Add userId ****
-          toolName: quickStartName,
-          toolDescription: quickStartDesc,
-          suggestedInputs: quickStartInputs.split('\n').map(s => s.trim()).filter(Boolean), // Split by newline
-          suggestedOutputs: quickStartOutputs.split('\n').map(s => s.trim()).filter(Boolean), // Split by newline
-          // toolGroup could be added if needed
-      };
-
+      setIsQuickStarting(true); setQuickStartError(null);
+      setGeneratedDefinition(null);
+      setGenDefError(null); setCreateToolError(null); setUpdateToolError(null);
+      const quickRequestData = { userId, toolName: quickStartName, toolDescription: quickStartDesc, suggestedInputs: quickStartInputs.split('\n').map(s => s.trim()).filter(Boolean), suggestedOutputs: quickStartOutputs.split('\n').map(s => s.trim()).filter(Boolean) };
       try {
-          const response = await fetch('/api/playground/quick-start-tool', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(quickRequestData),
-          });
+          const response = await fetch('/api/playground/quick-start-tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(quickRequestData) });
           const data = await response.json();
-
           if (!response.ok) {
-              setQuickStartError(data.error || `Request failed: ${response.status}`);
+              setQuickStartError(data.error || `Req failed: ${response.status}`);
           } else if (data.toolRequest) {
-              // Populate main form with the generated ToolRequest details
-              // const toolReq = data.toolRequest as ToolRequest;
-              // setGenName(toolReq.name);
-              // setGenDescription(toolReq.description);
-              // setGenPurpose(toolReq.purpose || toolReq.description);
-              // setGenInputs(Array.isArray(toolReq.inputs) ? toolReq.inputs : []);
-              // setGenExpectedOutput(toolReq.expectedOutput);
-              
-              // --- NEW: Set proposed structure instead of main form ---
               setProposedToolRequest(data.toolRequest as ToolRequest);
-              setStructureModifications([]); // Clear old structure mods
-              setRefineError(null); // Clear refinement errors
-              // Clear main form as we start refinement
-              setGenName('');
-              setGenDescription('');
-              setGenPurpose('');
-              setGenInputs([]);
-              setGenExpectedOutput('');
-              setGenModifications([]);
-              setGeneratedDefinition(null);
-              // ---------------------------------------------------------
-
-              // Clear quick start form
-              setQuickStartName('');
-              setQuickStartDesc('');
-              setQuickStartInputs('');
-              setQuickStartOutputs('');
+              setStructureModifications([]); setRefineError(null);
+              setGenName(''); setGenDescription(''); setGenPurpose('');
+              setGenInputs([]); setGenExpectedOutput('');
+              setGenModifications([]); setGeneratedDefinition(null);
+              setQuickStartName(''); setQuickStartDesc(''); setQuickStartInputs(''); setQuickStartOutputs('');
           } else {
               setQuickStartError("Received unexpected response from server.");
           }
@@ -690,36 +500,21 @@ export default function CustomToolPage() {
       } finally {
           setIsQuickStarting(false);
       }
-  };
+  }, [userId, quickStartName, quickStartDesc, quickStartInputs, quickStartOutputs]);
 
   // --- NEW HANDLER: Refine Structure ---
-  const handleRefineStructure = async () => {
-      if (!proposedToolRequest) return; // Should not happen if button is shown
-      if (!userId) { setRefineError("User ID not found."); return; } // Check userId
-
-      setIsRefining(true);
-      setRefineError(null);
-
-      const payload = {
-          userId: userId, // **** MODIFIED: Add userId ****
-          currentStructure: proposedToolRequest,
-          modifications: structureModifications,
-      };
-
+  const handleRefineStructure = useCallback(async () => {
+      if (!proposedToolRequest || !userId) return;
+      setIsRefining(true); setRefineError(null);
+      const payload = { userId, currentStructure: proposedToolRequest, modifications: structureModifications };
       try {
-          const response = await fetch('/api/playground/refine-tool-structure', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-          });
+          const response = await fetch('/api/playground/refine-tool-structure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
           const data = await response.json();
-
           if (!response.ok) {
               setRefineError(data.error || `Refinement request failed: ${response.status}`);
           } else if (data.refinedToolRequest) {
-              // Update the proposed structure with the refined version
               setProposedToolRequest(data.refinedToolRequest as ToolRequest);
-              setStructureModifications([]); // Clear mods after successful refinement
+              setStructureModifications([]);
           } else {
               setRefineError("Received unexpected response from refinement server.");
           }
@@ -729,109 +524,89 @@ export default function CustomToolPage() {
       } finally {
           setIsRefining(false);
       }
-  };
+  }, [userId, proposedToolRequest, structureModifications]);
 
   // --- NEW HANDLER: Accept Structure ---
-  const handleAcceptStructure = () => {
-      if (!proposedToolRequest) return; // Should not happen
-
-      // Populate main form with the accepted structure
+  const handleAcceptStructure = useCallback(() => {
+      if (!proposedToolRequest) return;
       setGenName(proposedToolRequest.name);
       setGenDescription(proposedToolRequest.description);
       setGenPurpose(proposedToolRequest.purpose || proposedToolRequest.description);
       setGenInputs(Array.isArray(proposedToolRequest.inputs) ? proposedToolRequest.inputs : []);
       setGenExpectedOutput(proposedToolRequest.expectedOutput);
-      
-      // Clear refinement state
       setProposedToolRequest(null);
       setStructureModifications([]);
       setRefineError(null);
-  };
+  }, [proposedToolRequest]);
 
   // --- NEW HANDLER: Clear Tool / Start Over ---
-  const handleClearTool = () => {
-      setToolRef('');
-      setSelectedToolDetails(null);
+  const handleClearTool = useCallback(() => {
+      setToolRef(''); // This will trigger the useEffect above to clear most state
+      // Explicitly clear states not covered by the useEffect's clear path
       setProposedToolRequest(null);
-
-      // Reset main form
-      setGenName('');
-      setGenDescription('');
-      setGenPurpose('');
-      setGenInputs([]);
-      setGenExpectedOutput('');
-      setGenCategory('');
-      setGenAdditionalContext('');
-      setGenExamplesJson('[]');
-      setGenModifications([]);
-
-      // Reset other states
       setStructureModifications([]);
-      setGeneratedDefinition(null);
-      setFormValues({});
+      setQuickStartName(''); setQuickStartDesc(''); setQuickStartInputs(''); setQuickStartOutputs('');
+      setConsultantUrl(''); setConsultantDataDesc(''); setAnalysisResult(null);
+      // Clear errors/success messages
+      setExecError(null); setResult(null); setToolListError(null);
+      setGenDefError(null); setCreateToolError(null); setUpdateToolError(null);
+      setQuickStartError(null); setRefineError(null); setAnalysisError(null);
+      setCreateToolSuccess(null); setUpdateToolSuccess(null);
+      // Ensure all definition fields are cleared (useEffect might miss some edge cases)
+      setGenName(''); setGenDescription(''); setGenPurpose(''); setGenInputs([]);
+      setGenExpectedOutput(''); setGenCategory(''); setGenAdditionalContext('');
+      setGenExamplesJson('[]'); setGenModifications([]); setGeneratedDefinition(null);
+      setIsGeneratingDef(false); setIsCreatingTool(false); setIsUpdatingTool(false);
+      setIsQuickStarting(false); setIsRefining(false); setIsAnalyzing(false);
+      setIsListLoading(false); setIsDetailsLoading(false); setIsExecuting(false);
+      console.log("Cleared tool state.");
+  }, [/* Add any setters if needed by ESLint */]);
 
-      // Clear errors
-      setExecError(null);
-      setGenDefError(null);
-      setCreateToolError(null);
-      setUpdateToolError(null);
-      setQuickStartError(null);
-      setRefineError(null);
-      setCreateToolSuccess(null); // Also clear success messages
-      setUpdateToolSuccess(null);
-  };
-
-  // Prepare the model prop for the component, adapting the provider case FOR THE COMPONENT'S VALUE PROP
-  // The component's value prop expects the string value of the enum member (UPPERCASE)
-  const adaptedModelProp = {
-      ...genModelArgs,
-      // Use the actual enum value for comparison logic within the component,
-      // but ensure the string value passed matches the <SelectItem value="...">
-      // The Select's `value` prop needs the string the SelectItem uses.
-      provider: String(genModelArgs.provider).toUpperCase() as any // Provide the UPPERCASE string value for the Select prop
-  };
-
-  // Prepare the model prop for the component display logic
-  const displayModelProp = {
-      ...genModelArgs
-      // provider is already the correct Enum type needed for internal comparisons
-  }
-
-  // Determine if Save/Update buttons should be enabled (requires implementation)
-  const hasImplementation = !!generatedDefinition?.implementation;
-  const canSaveOrUpdate = hasImplementation && genName && genDescription && genExpectedOutput && !genInputs.some(p => !p.name || !p.type || !p.description);
+  // --- NEW: Handler to delete implementation ---
+  const handleDeleteImplementation = useCallback(() => {
+      setGeneratedDefinition(prev => {
+        if (!prev) return null;
+        // Return the definition object, setting implementation to an empty string
+        // This satisfies the type requirement while indicating no code.
+        return { ...prev, implementation: '' };
+      });
+      // Optionally clear modification requests too?
+      // setGenModifications([]);
+      console.log("Deleted generated implementation.");
+  }, []);
 
   // --- REFACTORED: Generate/Regenerate Implementation ---
-  const handleGenerateImplementation = async () => {
-      if (!userId) { setGenDefError("User ID not found."); return; }
-      setIsGeneratingDef(true); setGenDefError(null); setGeneratedDefinition(null); // Clear previous result
-      setCreateToolError(null); setCreateToolSuccess(null); setUpdateToolError(null); setUpdateToolSuccess(null); // Clear save status
-
-      // Basic form validation
-      if (!genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)) {
-           setGenDefError("Tool Name, Description, Expected Output, and all Parameter details (Name, Type, Description) are required.");
-           setIsGeneratingDef(false);
-           return;
-      }
-
-      // Define an explicit type for the payload, including optional 'examples'
-      type GeneratePayload = {
-          userId: string;
-          name: string;
-          description: string;
-          purpose: string;
-          inputs: ToolInputParameter[];
-          expectedOutput: string;
-          category: string;
-          additionalContext: string;
-          modificationRequests: string[];
-          implementation?: string;
-          modelArgs: any; // Consider defining a more specific type for ModelArgs being sent
-          examples?: any[]; // Explicitly add optional examples field
-      };
-
-      const payload: GeneratePayload = { // Use the explicit type here
-          userId: userId,
+  const handleGenerateImplementation = useCallback(async () => {
+    if (!userId || !genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)) {
+         setGenDefError("Tool Name, Description, Expected Output, and all Parameter details (Name, Type, Description) are required.");
+         setIsGeneratingDef(false);
+         return;
+    }
+    setIsGeneratingDef(true); setGenDefError(null);
+    // --- MODIFICATION: Set implementation to empty string when starting generation ---
+    setGeneratedDefinition(prev => {
+        if (!prev) return null; // If no previous definition, keep it null
+        // Otherwise, keep the structure but clear the implementation
+        return { ...prev, implementation: '' };
+    });
+    // --- END MODIFICATION ---
+    setCreateToolError(null); setCreateToolSuccess(null); setUpdateToolError(null); setUpdateToolSuccess(null);
+    type GeneratePayload = {
+        userId: string;
+        name: string;
+        description: string;
+        purpose: string;
+        inputs: ToolInputParameter[];
+        expectedOutput: string;
+        category: string;
+        additionalContext: string;
+        modificationRequests: string[];
+        implementation?: string;
+        modelArgs: any;
+        examples?: any[];
+    };
+    const payload: GeneratePayload = {
+        userId,
           name: genName,
           description: genDescription,
           purpose: genPurpose || genDescription,
@@ -839,53 +614,178 @@ export default function CustomToolPage() {
           expectedOutput: genExpectedOutput,
           category: genCategory,
           additionalContext: genAdditionalContext,
-          modificationRequests: genModifications,
-          implementation: generatedDefinition?.implementation,
-          modelArgs: {
-              ...genModelArgs,
-              provider: String(genModelArgs.provider).toUpperCase()
-          }
-          // 'examples' will be added below conditionally
-      };
-       try {
-          const parsedExamples = JSON.parse(genExamplesJson);
-          if (Array.isArray(parsedExamples)) {
-              payload.examples = parsedExamples; // Now TypeScript knows 'examples' is a valid property
-          }
-      } catch (e) { console.warn("Could not parse examples JSON."); }
+        modificationRequests: genModifications,
+        // Send the PREVIOUS implementation (if it existed) to the API for context
+        implementation: generatedDefinition?.implementation,
+        modelArgs: {
+            ...genModelArgs,
+            provider: String(genModelArgs.provider).toUpperCase()
+        }
+    };
+     try {
+        const parsedExamples = JSON.parse(genExamplesJson);
+        if (Array.isArray(parsedExamples)) {
+            payload.examples = parsedExamples;
+        }
+        const response = await fetch('/api/playground/generate-tool-definition', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await response.json();
+        if (!response.ok) {
+            setGenDefError(data.error || `Request failed: ${response.status}`);
+            // --- MODIFICATION: Restore previous definition if generation fails? Maybe not needed.
+        } else {
+            setGeneratedDefinition(data.definition); // Set the new full definition
+            if (data.definition) {
+                setGenName(data.definition.name || genName);
+                const params = data.definition.parameters || data.definition.inputs;
+                setGenInputs(Array.isArray(params) ? params : genInputs);
+                setGenExpectedOutput(data.definition.expectedOutput || genExpectedOutput);
+            }
+        }
+    } catch (err) { setGenDefError(err instanceof Error ? err.message : 'API error.'); } finally { setIsGeneratingDef(false); }
+  }, [userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput, genCategory, genAdditionalContext, genModifications, generatedDefinition, genModelArgs, genExamplesJson]);
 
-      try {
-          const response = await fetch('/api/playground/generate-tool-definition', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload), // Send the correctly typed payload
-          });
-          const data = await response.json();
-          if (!response.ok) {
-              setGenDefError(data.error || `Request failed: ${response.status}`);
-              if (data.details) console.error("Validation:", data.details);
-          } else {
-              setGeneratedDefinition(data.definition); // Store the full definition + implementation
-              // Update form fields with potentially refined structure from AI
-              if (data.definition) {
-                  setGenName(data.definition.name || genName);
-                  setGenDescription(data.definition.description || genDescription);
-                  // Use 'parameters' key if API returns that
-                  const params = data.definition.parameters || data.definition.inputs;
-                  setGenInputs(Array.isArray(params) ? params : genInputs);
-                  setGenExpectedOutput(data.definition.expectedOutput || genExpectedOutput);
-              }
-          }
-      } catch (err) { setGenDefError(err instanceof Error ? err.message : 'API call failed.'); }
-      finally { setIsGeneratingDef(false); }
-  };
+  // --- NEW: Scraper Consultant Handlers ---
+  const handleAnalyzeWebsite = useCallback(async () => {
+    if (!userId || !consultantUrl) {
+        setAnalysisError("User ID and Target URL are required for analysis.");
+        return;
+    }
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+    setAnalysisError(null);
+
+    try {
+        const response = await fetch('/api/playground/analyze-scraping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: userId,
+                targetUrl: consultantUrl,
+                dataDescription: consultantDataDesc || undefined
+            })
+        });
+
+        const data: AnalysisResult | { error: string; details?: any } = await response.json();
+
+        if (!response.ok) {
+            const errorMsg = (data as { error: string }).error || `Analysis request failed: ${response.status}`;
+            setAnalysisError(errorMsg);
+             if ((data as { details: any }).details) console.error("Analysis Validation:", (data as { details: any }).details);
+        } else {
+            setAnalysisResult(data as AnalysisResult);
+        }
+    } catch (err) {
+        console.error("Scraper Consultant API call failed:", err);
+        setAnalysisError(err instanceof Error ? err.message : 'Analysis API error.');
+    } finally {
+        setIsAnalyzing(false);
+    }
+  }, [userId, consultantUrl, consultantDataDesc]);
+
+  const handlePopulateFromAnalysis = useCallback(() => {
+    if (!analysisResult || !consultantUrl) return;
+
+    // 1. Populate Basic Info
+    try {
+        const urlHostname = new URL(consultantUrl).hostname.replace(/\./g, '_');
+        setGenName(`scrape_${urlHostname}`);
+    } catch {
+        setGenName(`scrape_website`);
+    }
+    setGenDescription(`Scrapes ${consultantDataDesc || 'data'} from ${consultantUrl} using ${analysisResult.suggestedMethod || 'the recommended method'}.`);
+    setGenPurpose(`To extract specific data ('${consultantDataDesc || 'general content'}') from the target website.`);
+    setGenInputs([{ name: 'url', type: 'string', description: 'Target URL to scrape', required: true, default: consultantUrl }]);
+    setGenExpectedOutput(`Structured data containing ${consultantDataDesc || 'the extracted content'} in JSON format.`);
+
+    // 2. Generate Modification Requests
+    const newModifications: string[] = [];
+    const method = analysisResult.suggestedMethod;
+
+    if (method?.includes('Firecrawl')) {
+        newModifications.push("Use the 'executeFirecrawlScrape' helper function. Import it from '@/src/lib/agent-tools/helpers/web-scraping'. Handle potential errors.");
+    } else if (method?.includes('Visual Scrape')) {
+        newModifications.push("Use the 'executeVisualScrape' helper function. Import it from '@/src/lib/agent-tools/helpers/visual-scraping'. Handle potential errors.");
+    } else if (method?.includes('Standard Fetch / Cheerio')) {
+        newModifications.push("Use standard Node.js fetch and the 'cheerio' library to parse HTML.");
+        if (analysisResult.suggestedSelectors && Object.keys(analysisResult.suggestedSelectors).length > 0) {
+             newModifications.push(`Attempt to use these suggested selectors: ${JSON.stringify(analysisResult.suggestedSelectors)}`);
+        }
+    } else {
+         newModifications.push("Carefully review the analysis results and implement the most appropriate scraping method.");
+    }
+
+    analysisResult.potentialIssues?.forEach(issue => {
+        if (issue.toLowerCase().includes('javascript') || issue.toLowerCase().includes('js rendering')) {
+             newModifications.push("Ensure the chosen method handles JavaScript rendering if necessary (Firecrawl/VisualScrape do, Fetch/Cheerio does not).");
+        } else if (issue.toLowerCase().includes('cloudflare') || issue.toLowerCase().includes('anti-bot')) {
+            newModifications.push("Implement robust error handling and potentially add request headers/delays to mimic a real browser, or rely on helpers designed to bypass basic blocks.");
+        } else if (issue.toLowerCase().includes('timeout')) {
+             newModifications.push("Implement proper timeout handling for network requests.");
+        } else if (issue.toLowerCase().includes('login')) {
+             newModifications.push("Scraping requires handling login; this tool likely needs parameters for credentials or session cookies.");
+        } else if (issue.toLowerCase().includes('selector')) {
+             newModifications.push("Carefully validate or manually define CSS selectors for reliable data extraction.");
+        } else {
+            newModifications.push(`Address potential issue: ${issue}`);
+        }
+    });
+    setGenModifications(prev => [...new Set([...prev, ...newModifications])]);
+
+    // 3. Set Additional Context
+    const analysisSummary = `
+## Scraping Analysis Results for: ${consultantUrl}
+User Data Description: ${consultantDataDesc || '(Not provided)'}
+---------------------------------------------
+Status: ${analysisResult.status || 'N/A'}
+Message: ${analysisResult.message || 'N/A'}
+Suggested Method: ${analysisResult.suggestedMethod || 'N/A'}
+Potential Issues: ${analysisResult.potentialIssues?.join('; ') || 'None apparent'}
+
+## Suggested Selectors
+\`\`\`json
+${analysisResult.suggestedSelectors ? JSON.stringify(analysisResult.suggestedSelectors, null, 2) : '{}'}
+\`\`\`
+
+## Preliminary Check Details
+Accessible: ${analysisResult.preliminaryCheck?.accessible ? 'Yes' : 'No'}
+Status Code: ${analysisResult.preliminaryCheck?.statusCode || 'N/A'}
+Content Type: ${analysisResult.preliminaryCheck?.contentType || 'N/A'}
+Likely Block Page: ${analysisResult.preliminaryCheck?.isLikelyBlockPage ? `Yes (${analysisResult.preliminaryCheck?.blockReason || 'Unknown'})` : 'No'}
+Error: ${analysisResult.preliminaryCheck?.error || 'None'}
+
+## Firecrawl Check Details (if attempted)
+Attempted: ${analysisResult.firecrawlCheck?.attempted ? 'Yes' : 'No'}
+Success: ${analysisResult.firecrawlCheck?.success ? 'Yes' : 'No'}
+Error: ${analysisResult.firecrawlCheck?.error || 'None'}
+    `.trim();
+    setGenAdditionalContext(prev => prev ? `${prev}\n\n${analysisSummary}` : analysisSummary);
+
+    console.log("Populated definition fields based on analysis.");
+
+  }, [analysisResult, consultantUrl, consultantDataDesc]);
+
+  // --- Render Helper ---
+  const adaptedModelProp = { ...genModelArgs, provider: String(genModelArgs.provider).toUpperCase() as any };
+  const displayModelProp = { ...genModelArgs };
+  const hasImplementation = !!generatedDefinition?.implementation;
+  const isDefinitionFormValid = genName && genDescription && genExpectedOutput && !genInputs.some(p => !p.name || !p.type || !p.description);
+  // Update canSaveOrUpdate logic to only require implementation and valid form fields
+  const canSaveOrUpdate = hasImplementation && isDefinitionFormValid;
+  // Rename the derived constant to avoid conflict with the state setter
+  const isExecutionReady = selectedToolDetails && selectedToolDetails.parameters.every(param => {
+      const isRequired = param.required !== false;
+      if (!isRequired) return true;
+      const value = formValues[param.name];
+      return !(value === null || value === undefined || value === '');
+  });
 
   return (
-    <div className="p-5 font-sans flex flex-col gap-6 max-w-3xl mx-auto"> {/* Increased max-width */}
+    <div className="p-5 font-sans flex flex-col gap-6 max-w-4xl mx-auto">
     <div className="h-24 w-full"/>
       <h1 className="text-3xl font-bold mb-6 text-center">Custom Tool Playground</h1>
 
-      {/* Section 0: Quick Start - Only show if not loading existing or refining new */}
-      {!selectedToolDetails && !proposedToolRequest && (
+      {/* Section 0a: Quick Start - Conditionally Visible */}
+      {!toolRef && !proposedToolRequest && (
           <Card>
               <CardHeader>
                   <CardTitle>Quick Start: Define a Tool Concept</CardTitle>
@@ -920,401 +820,388 @@ export default function CustomToolPage() {
           </Card>
       )}
 
-      {/* Section 1: Test Existing Tool Execution */}
+       {/* Section 0b: Scraper Consultant - Conditionally Visible */}
+       {!toolRef && !proposedToolRequest && (
+        <Card className="border-cyan-300 border">
+            <CardHeader>
+                <CardTitle className="text-cyan-700">Scraper Consultant</CardTitle>
+                <CardDescription>Analyze a website to determine scraping viability and recommended methods before defining the tool below.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+                 <div className="grid w-full items-center gap-1.5">
+                     <Label htmlFor="consultantUrl">Target Website URL</Label>
+                     <Input
+                        id="consultantUrl"
+                        value={consultantUrl}
+                        onChange={(e) => setConsultantUrl(e.target.value)}
+                        placeholder="https://example.com"
+                        disabled={isAnalyzing}
+                        type="url"
+                     />
+                 </div>
+                  <div className="grid w-full items-center gap-1.5">
+                     <Label htmlFor="consultantDataDesc">Describe Data to Extract (Optional)</Label>
+                     <Textarea
+                        id="consultantDataDesc"
+                        value={consultantDataDesc}
+                        onChange={(e) => setConsultantDataDesc(e.target.value)}
+                        placeholder="e.g., Extract all product names, prices, and ratings from the search results page."
+                        rows={3}
+                        disabled={isAnalyzing}
+                     />
+                     <p className="text-xs text-gray-500">Helps in suggesting relevant selectors.</p>
+                 </div>
+            </CardContent>
+            <CardFooter className="flex flex-col items-start gap-3">
+                 <Button onClick={handleAnalyzeWebsite} disabled={isAnalyzing || !userId || !consultantUrl}>
+                    {isAnalyzing ? 'Analyzing...' : 'Analyze Website for Scraping'}
+                 </Button>
+                 {/* Analysis Results Display */}
+                 {analysisError && (
+                    <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Analysis Error:</strong><pre className="mt-1 text-sm">{analysisError}</pre></div>
+                 )}
+                 {analysisResult && (
+                    <ScrollArea className="border border-gray-300 p-3 bg-gray-50 rounded w-full mt-2 max-h-[300px]">
+                        <h4 className="text-sm font-semibold mb-2">Analysis Results:</h4>
+                        <p className="text-xs mb-1"><strong className="font-medium">Overall Status:</strong> <span className={analysisResult.status === 'success' ? 'text-green-700' : 'text-red-700'}>{analysisResult.status}</span></p>
+                        <p className="text-xs mb-1"><strong className="font-medium">Message:</strong> {analysisResult.message}</p>
+                        <Separator className="my-2" />
+                        <p className="text-xs mb-1"><strong className="font-medium">Suggested Method:</strong> {analysisResult.suggestedMethod || 'N/A'}</p>
+                        <div className="text-xs mb-1">
+                            <strong className="font-medium">Potential Issues:</strong>
+                             {analysisResult.potentialIssues && analysisResult.potentialIssues.length > 0 ? (
+                                <ul className="list-disc list-inside pl-4">
+                                    {analysisResult.potentialIssues.map((issue, idx) => <li key={idx}>{issue}</li>)}
+                                </ul>
+                            ) : (
+                                <span> None apparent</span>
+                            )}
+                        </div>
+                        <div className="text-xs">
+                            <strong className="font-medium">Suggested Selectors:</strong>
+                             <pre className="mt-1 text-xs whitespace-pre-wrap break-all bg-gray-100 p-2 rounded border border-gray-200 text-gray-800 max-h-[150px] overflow-auto">
+                                {analysisResult.suggestedSelectors ? JSON.stringify(analysisResult.suggestedSelectors, null, 2) : "{}"}
+                             </pre>
+                        </div>
+                         {/* Populate Button */}
+                         <Button
+                              variant="secondary"
+                              size="sm"
+                              className="mt-3"
+                              onClick={handlePopulateFromAnalysis}
+                              disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
+                          >
+                             Use Analysis Results to Populate Fields Below
+                         </Button>
+                    </ScrollArea>
+                 )}
+            </CardFooter>
+        </Card>
+       )}
+
+      {/* Section 1: Tool Selection & Execution - Always Visible */}
       <Card>
-        <CardHeader>
-          <CardTitle>Tool Execution</CardTitle>
-          <CardDescription>Select a registered custom tool and provide arguments to test its execution.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-           {/* Tool Selection Dropdown */}
-      <div className="grid w-full items-center gap-1.5">
-                <Label htmlFor="toolSelect">Select Tool</Label>
-                <Select
-                    onValueChange={handleToolSelect}
-                    value={toolRef || "placeholder"}
-                    // Disable if userId is missing OR list is loading
-                    disabled={!userId || isListLoading || isExecuting || isGeneratingDef || isCreatingTool || isUpdatingTool}
+          <CardHeader>
+              <CardTitle>{selectedToolDetails ? `Execute: ${selectedToolDetails.name}` : 'Load / Execute Tool'}</CardTitle>
+              <CardDescription>{selectedToolDetails ? 'Provide arguments and execute the selected tool.' : 'Select a tool from the list to load its details and enable execution.'}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+              {/* Tool Selection Dropdown */}
+              <div className="grid w-full items-center gap-1.5">
+                  <Label htmlFor="toolSelect">Select Tool</Label>
+                  <Select onValueChange={handleToolSelect} value={toolRef || "placeholder"} disabled={!userId || isListLoading || isExecuting || isGeneratingDef || isCreatingTool || isUpdatingTool}>
+                      <SelectTrigger id="toolSelect" className="w-full">
+                          <SelectValue placeholder={
+                              !userId ? "Waiting for User ID..." :
+                              (isListLoading ? "Loading tools..." : "Select a tool...")
+                          } />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="placeholder" disabled>
+                              {!userId ? "Waiting..." : (isListLoading ? "Loading..." : "Select...")}
+                          </SelectItem>
+                          {userId && !isListLoading && toolList.length === 0 && <SelectItem value="no-tools" disabled>No custom tools found</SelectItem>}
+                          {userId && !isListLoading && toolList.map((tool) => (
+                              <SelectItem key={tool.id} value={tool.reference}>
+                                  {tool.name} <span className="text-xs text-gray-500 ml-2">({tool.reference})</span>
+                              </SelectItem>
+                          ))}
+                      </SelectContent>
+                  </Select>
+                  {toolListError && <p className="text-sm text-red-600 mt-1">{toolListError}</p>}
+              </div>
+
+              {/* Arguments Area */}
+              {isDetailsLoading && <p className="text-sm text-gray-500">Loading arguments...</p>}
+              {!isDetailsLoading && !selectedToolDetails && <p className="text-sm text-gray-500 italic">Select a tool above to view arguments.</p>}
+              {selectedToolDetails && !isDetailsLoading && (
+                  <div className="border border-gray-200 p-4 rounded flex flex-col gap-3">
+                      <h3 className="text-md font-semibold">Arguments for Execution</h3>
+                       {selectedToolDetails.parameters.length === 0 && <p className="text-sm text-gray-500">No arguments required.</p>}
+                      {selectedToolDetails.parameters.map((param) => (
+                           <div key={param.name} className="grid w-full items-center gap-1.5">
+                                <Label htmlFor={param.name}>{param.description || param.name}{param.required !== false && <span className="text-red-500 ml-1">*</span>}</Label>
+                                {param.type === 'string' && <Input type="text" id={param.name} name={param.name} value={formValues[param.name] || ''} onChange={(e) => handleFormChange(param.name, e.target.value, param.type)} placeholder={param.description || param.name} disabled={isExecuting} />}
+                                {param.type === 'number' && <Input type="number" id={param.name} name={param.name} value={formValues[param.name] || ''} onChange={(e) => handleFormChange(param.name, e.target.value, param.type)} placeholder={param.description || param.name} disabled={isExecuting} />}
+                                {param.type === 'boolean' && <div className="flex items-center space-x-2 mt-1"><Checkbox id={param.name} name={param.name} checked={!!formValues[param.name]} onCheckedChange={(checked) => handleCheckboxChange(param.name, checked)} disabled={isExecuting} /></div>}
+                                {param.type !== 'string' && param.type !== 'number' && param.type !== 'boolean' && <p className="text-xs text-orange-500">Unsupported Input Type: {param.type}</p>}
+                           </div>
+                       ))}
+                  </div>
+              )}
+          </CardContent>
+          <CardFooter className="flex flex-col items-start gap-2">
+              {/* Execute Button */}
+              <Button
+                  onClick={handleExecute}
+                  disabled={!selectedToolDetails || !isExecutionReady || isExecuting || isDetailsLoading || isGeneratingDef || isCreatingTool || isUpdatingTool}
                 >
-                    <SelectTrigger id="toolSelect" className="w-full">
-                        <SelectValue placeholder={
-                            !userId ? "Waiting for User ID..." :
-                            (isListLoading ? "Loading tools..." : "Select a tool...")
-                        } />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="placeholder" disabled>
-                            {!userId ? "Waiting for User ID..." :
-                            (isListLoading ? "Loading tools..." : "Select a tool...")}
-                        </SelectItem>
-                        {/* Only map tools if userId exists and not loading */}
-                        {userId && !isListLoading && toolList.length === 0 && <SelectItem value="no-tools" disabled>No custom tools found for user</SelectItem>}
-                        {userId && !isListLoading && toolList.map((tool) => ( <SelectItem key={tool.id} value={tool.reference}>{tool.name} <span className="text-xs text-gray-500 ml-2">({tool.reference})</span></SelectItem> ))}
-                    </SelectContent>
-                </Select>
-                {/* Display dedicated list loading error */}
-                {toolListError && <p className="text-sm text-red-600 mt-1">{toolListError}</p>}
-                {/* Display tool description if available */}
-                {selectedToolDetails?.description && <p className="text-sm text-gray-600 mt-1">{selectedToolDetails.description}</p>}
-      </div>
-            {/* Dynamic Arguments Form Area */}
-            {isDetailsLoading && <p className="text-sm text-gray-500">Loading arguments...</p>}
-            {selectedToolDetails && !isDetailsLoading && (
-              <div className="border border-gray-200 p-4 rounded flex flex-col gap-3">
-                  <h3 className="text-md font-semibold">Arguments</h3>
-                  {selectedToolDetails.parameters.length === 0 && <p className="text-sm text-gray-500">This tool requires no arguments.</p>}
-                  {selectedToolDetails.parameters.map((param) => ( /* Render form fields based on params */
-                      <div key={param.name} className="grid w-full items-center gap-1.5">
-                           <Label htmlFor={param.name}>{param.description || param.name}{param.required !== false && <span className="text-red-500 ml-1">*</span>}</Label>
-                           {param.type === 'string' && <Input type="text" id={param.name} name={param.name} value={formValues[param.name] || ''} onChange={(e) => handleFormChange(param.name, e.target.value, param.type)} placeholder={param.description || param.name} disabled={isExecuting} />}
-                           {param.type === 'number' && <Input type="number" id={param.name} name={param.name} value={formValues[param.name] || ''} onChange={(e) => handleFormChange(param.name, e.target.value, param.type)} placeholder={param.description || param.name} disabled={isExecuting} />}
-                           {param.type === 'boolean' && <div className="flex items-center space-x-2 mt-1"><Checkbox id={param.name} name={param.name} checked={!!formValues[param.name]} onCheckedChange={(checked) => handleCheckboxChange(param.name, checked)} disabled={isExecuting} /></div>}
-                           {param.type !== 'string' && param.type !== 'number' && param.type !== 'boolean' && <p className="text-xs text-orange-500">Unsupported: {param.type}</p>}
-      </div>
-                  ))}
-      </div>
-      )}
-        </CardContent>
-        <CardFooter className="flex flex-col items-start gap-2">
-           <Button onClick={handleExecute} disabled={!userId || isExecuting || !toolRef || toolRef === "placeholder" || isListLoading || isDetailsLoading || !canExecute}>
-             {isExecuting ? 'Executing...' : 'Execute Tool'}
-           </Button>
-            {/* Add a helper text if button is disabled due to missing required fields */}
-            {selectedToolDetails && !canExecute && <p className="text-xs text-orange-600">Please fill in all required arguments (*).</p>}
-            {/* Execution Error/Result */}
-            {execError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Execution Error:</strong><pre className="mt-1 text-sm">{execError}</pre></div>}
-            {result && <div className="border border-gray-300 p-3 bg-gray-800 rounded w-full"><strong className="font-semibold">Execution Result:</strong><pre className="mt-1 text-sm whitespace-pre-wrap break-all">{result}</pre></div>}
-            {/* Add Clear button if a tool is loaded */} 
-            {selectedToolDetails && (
-                <Button variant="destructive" size="sm" onClick={handleClearTool} className="mt-4">
-                    Clear Tool / Start Over
-                </Button>
-            )}
-        </CardFooter>
+                  {isExecuting ? 'Executing...' : 'Execute Tool'}
+              </Button>
+              {selectedToolDetails && !isExecutionReady && <p className="text-xs text-orange-600">Fill required arguments (*).</p>}
+
+              {/* Execution Results/Errors */}
+              {execError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Exec Error:</strong><pre className="mt-1 text-sm">{execError}</pre></div>}
+              {result && <div className="border border-gray-300 p-3 bg-gray-800 rounded w-full"><strong className="font-semibold">Exec Result:</strong><pre className="mt-1 text-sm whitespace-pre-wrap break-all">{result}</pre></div>}
+
+              {/* Clear Button - Always available */}
+              <Button variant="destructive" size="sm" onClick={handleClearTool} className="mt-4"> Clear All / Start Over </Button>
+          </CardFooter>
       </Card>
 
-      {/* Section 2: Test Definition Generation */}
-       <Card>
+      {/* Section 2: Tool Definition & Implementation - Always Visible */}
+      <Card>
         <CardHeader>
-           <CardTitle>Tool Definition & Implementation</CardTitle>
-           <CardDescription>
-               Define the tool's structure (name, parameters, etc.) and generate its implementation code.
-               Use "Generate/Regenerate Implementation" to create or modify the code below using the selected AI model.
-               Once you have the desired implementation, use "Save as New Tool" or "Save Updates" to persist it.
-           </CardDescription>
+            <CardTitle>{selectedToolDetails ? `Define/Edit: ${genName || '(Loading...)'}` : 'Define New Tool'}</CardTitle>
+            <CardDescription>
+                {selectedToolDetails ? 'Modify the definition or implementation below. Use "Generate..." to update the code, then "Save Updates..." to persist.' : 'Define the structure, generate the implementation, and use "Save as New Tool". Select a tool above to load it for editing.'}
+            </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-            {/* Inputs for Tool Definition */}
+             {/* All form fields (genName, genDescription, genInputs, etc.) remain here */}
+             {/* ... Name, Description, Purpose ... */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid w-full items-center gap-1.5">
+                    <Label htmlFor="toolName">Tool Name <span className="text-red-500">*</span></Label>
+                    <Input id="toolName" value={genName} onChange={(e) => setGenName(e.target.value)} placeholder="e.g., CLICKBANK_MARKETPLACE_ANALYZER" disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                </div>
+                 <div className="grid w-full items-center gap-1.5">
+                     <Label htmlFor="toolPurpose">Tool Purpose (Optional)</Label>
+                     <Input id="toolPurpose" value={genPurpose} onChange={(e) => setGenPurpose(e.target.value)} placeholder="Defaults to description if empty" disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                 </div>
+            </div>
              <div className="grid w-full items-center gap-1.5">
-                 <Label htmlFor="genName">Tool Name</Label>
-                 <Input id="genName" value={genName} onChange={(e) => setGenName(e.target.value)} placeholder="e.g., SearchClickbank" disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
-             </div>
-              <div className="grid w-full items-center gap-1.5">
-                 <Label htmlFor="genDescription">Tool Description</Label>
-                 <Textarea id="genDescription" value={genDescription} onChange={(e) => setGenDescription(e.target.value)} placeholder="e.g., Searches the Clickbank marketplace..." rows={2} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
-             </div>
-              <div className="grid w-full items-center gap-1.5">
-                 <Label htmlFor="genPurpose">Tool Purpose (Optional, helps AI)</Label>
-                 <Textarea id="genPurpose" value={genPurpose} onChange={(e) => setGenPurpose(e.target.value)} placeholder="e.g., To find high-gravity affiliate products in a niche." rows={2} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                 <Label htmlFor="toolDescription">Description <span className="text-red-500">*</span></Label>
+                 <Textarea id="toolDescription" value={genDescription} onChange={(e) => setGenDescription(e.target.value)} placeholder="Describe what the tool does..." rows={3} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
              </div>
 
-             {/* --- Restore Generation Model Selection --- */}
-             <div className="border p-3 rounded-md bg-gray-50/50">
-                 <Label className="text-md font-semibold block mb-2">Generation Model</Label>
+              {/* Model Selection */}
+             <div className="border p-3 rounded-md space-y-3 bg-gray-50">
+                 <Label className="font-semibold text-gray-700">LLM Configuration (for generation)</Label>
                  <ModelProviderSelect
-                    index={0}
-                    localState={localState}
-                    model={displayModelProp} // Use this for internal logic if needed
+                    model={displayModelProp}
                     modelProviderChanged={handleModelProviderChange}
                     modelNameChanged={handleModelNameChange}
                     temperatureChanged={handleTemperatureChange}
+                    index={0}
+                    localState={localState}
+
                  />
              </div>
 
-             {/* Keep Modifications Section for USER INPUT ONLY */}
-             <div className="space-y-2 border p-3 rounded-md bg-gray-50">
-                 <Label className="text-md font-semibold block mb-2">Implementation Modification Requests (Optional)</Label>
-                 {genModifications.length === 0 && (
-                     <p className="text-xs text-gray-500 italic">Add specific instructions to modify the generated code.</p>
-                 )}
+              {/* Modification Requests */}
+             <div className="border p-3 rounded-md space-y-3">
+                 <Label className="font-semibold">Modification Requests (Optional)</Label>
+                 <p className="text-xs text-gray-500">Provide instructions to the LLM on how to generate or modify the implementation code below.</p>
                  {genModifications.map((mod, index) => (
                      <div key={index} className="flex items-center gap-2">
                          <Input
-                             type="text"
-                             value={mod}
-                             onChange={(e) => handleModificationChange(index, e.target.value)}
-                             placeholder={`Modification request ${index + 1}...`}
-                             disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                             className="flex-grow h-8 text-sm"
+                            type="text"
+                            value={mod}
+                            onChange={(e) => handleModificationChange(index, e.target.value)}
+                            placeholder={`e.g., Add error handling for network requests`}
+                            className="flex-grow"
+                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
                          />
-                         <Button
-                             variant="ghost"
-                             size="sm"
-                             onClick={() => handleRemoveModification(index)}
-                             disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                             aria-label="Remove modification"
-                             className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 shrink-0"
-                         >
-                             X
-                         </Button>
+                         <Button variant="ghost" size="sm" onClick={() => handleRemoveModification(index)} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}>X</Button>
                      </div>
                  ))}
-                 <Button 
-                     onClick={handleAddModification} 
-                     variant="outline"
-                     size="sm"
-                     disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                     className="text-xs mt-2"
-                 >
-                     + Add Modification Request
-                 </Button>
+                 <Button variant="outline" size="sm" onClick={handleAddModification} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}>+ Add Modification Request</Button>
              </div>
 
-             {/* --- RE-ADD Input Parameters Section --- */}
-             <div className="space-y-4 border p-4 rounded-md">
-                 <div className="flex justify-between items-center mb-2">
-                     <Label className="text-lg font-semibold">Input Parameters</Label>
-                     <Button 
-                         onClick={handleAddParameter} 
-                         variant="outline" 
-                         size="sm"
-                         disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                     >
-                         Add Parameter
-                     </Button>
-                 </div>
-                 
-                 {genInputs.length === 0 && (
-                     <div className="text-center py-6 text-gray-500">
-                         No parameters defined. Click "Add Parameter" to create one.
-                     </div>
-                 )}
-                 
-                 {genInputs.length > 0 && (
-                     <div className="space-y-2">
-                         {/* Table header */}
-                         <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-gray-100 rounded-t-md text-xs font-semibold text-gray-700">
-                             <div className="col-span-3">NAME</div>
-                             <div className="col-span-2">TYPE</div>
-                             <div className="col-span-5">DESCRIPTION</div>
-                             <div className="col-span-1 text-center">REQ</div>
-                             <div className="col-span-1 text-center"></div>
-                         </div>
-                         
-                         {/* Parameter rows */}
-                         {genInputs.map((input, index) => (
-                             <div key={index} className="grid grid-cols-12 gap-2 px-3 py-2 border rounded-md items-center hover:bg-gray-50">
-                                 {/* Name */}
-                                 <div className="col-span-3">
-                                     <Input
-                                         id={`param-name-${index}`}
-                                         value={input.name}
-                                         onChange={(e) => handleParameterChange(index, 'name', e.target.value)}
-                                         placeholder="parameter_name"
-                                         disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                         className="font-mono text-sm h-8"
-                                     />
-                                 </div>
-                                 
-                                 {/* Type */}
-                                 <div className="col-span-2">
-                                     <Select
-                                         value={input.type}
-                                         onValueChange={(value) => handleParameterChange(index, 'type', value)}
-                                         disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                     >
-                                         <SelectTrigger id={`param-type-${index}`} className="h-8 text-xs">
-                                             <SelectValue placeholder="Type" />
-                                         </SelectTrigger>
-                                         <SelectContent>
-                                             <SelectItem value="string">string</SelectItem>
-                                             <SelectItem value="number">number</SelectItem>
-                                             <SelectItem value="boolean">boolean</SelectItem>
-                                             <SelectItem value="array">array</SelectItem>
-                                             <SelectItem value="object">object</SelectItem>
-                                         </SelectContent>
-                                     </Select>
-                                 </div>
-                                 
-                                 {/* Description */}
-                                 <div className="col-span-5">
-                                     <Input
-                                         id={`param-desc-${index}`}
-                                         value={input.description}
-                                         onChange={(e) => handleParameterChange(index, 'description', e.target.value)}
-                                         placeholder="Parameter description"
-                                         disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                         className="text-sm h-8"
-                                     />
-                                 </div>
-
-                                 {/* Required checkbox */}
-                                 <div className="col-span-1 flex justify-center">
-                                     <Checkbox
-                                         id={`param-required-${index}`}
-                                         checked={input.required ?? true}
-                                         onCheckedChange={(checked) => handleParameterChange(index, 'required', typeof checked === 'boolean' ? checked : true)}
-                                         disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                     />
-                                 </div>
-
-                                 {/* Delete button */}
-                                 <div className="col-span-1 flex justify-center">
-                                     <Button
-                                         variant="ghost"
-                                         size="sm"
-                                         onClick={() => handleRemoveParameter(index)}
-                                         disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                         aria-label="Remove parameter"
-                                         className="h-8 w-8 p-0 text-gray-400 hover:text-red-500"
-                                     >
-                                         X
-                                     </Button>
-                                 </div>
-                                 
-                                 {/* Default value - shown in expandable area or tooltip */}
-                                 {/* This could be added in the future if needed */}
+             {/* Input Parameters Section */}
+             <div className="border p-3 rounded-md space-y-3">
+                <Label className="font-semibold">Input Parameters <span className="text-red-500">*</span></Label>
+                 {genInputs.map((param, index) => (
+                    <div key={index} className="border-t pt-3 mt-3 flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                           <p className="text-sm font-medium">Parameter {index + 1}</p>
+                           <Button variant="ghost" size="sm" onClick={() => handleRemoveParameter(index)} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}>Remove</Button>
+                        </div>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                             <div className="grid w-full items-center gap-1.5">
+                                 <Label htmlFor={`param-name-${index}`}>Name <span className="text-red-500">*</span></Label>
+                                 <Input id={`param-name-${index}`} value={param.name} onChange={(e) => handleParameterChange(index, 'name', e.target.value)} placeholder="e.g., niche_category" disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
                              </div>
-                         ))}
-                     </div>
-                 )}
-                 
-                 {genInputs.length > 0 && (
-                     <div className="flex mt-2">
-                         <Button 
-                             onClick={handleAddParameter} 
-                             variant="outline"
-                             size="sm"
-                             disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                             className="text-xs"
-                         >
-                             + Add Parameter
-                         </Button>
-                     </div>
-                 )}
-             </div>
-             {/* --- END RE-ADD Input Parameters Section --- */}
+                             <div className="grid w-full items-center gap-1.5">
+                                <Label htmlFor={`param-type-${index}`}>Type <span className="text-red-500">*</span></Label>
+                                 <Select value={param.type} onValueChange={(value) => handleParameterChange(index, 'type', value)} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}>
+                                     <SelectTrigger id={`param-type-${index}`}><SelectValue /></SelectTrigger>
+                                     <SelectContent>
+                                        <SelectItem value="string">String</SelectItem>
+                                        <SelectItem value="number">Number</SelectItem>
+                                        <SelectItem value="boolean">Boolean</SelectItem>
+                                        <SelectItem value="array">Array</SelectItem>
+                                        <SelectItem value="object">Object</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                         <div className="grid w-full items-center gap-1.5">
+                             <Label htmlFor={`param-desc-${index}`}>Description <span className="text-red-500">*</span></Label>
+                             <Input id={`param-desc-${index}`} value={param.description} onChange={(e) => handleParameterChange(index, 'description', e.target.value)} placeholder="Describe the parameter" disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                         </div>
+                         <div className="flex items-center space-x-2 mt-1">
+                             <Checkbox id={`param-required-${index}`} checked={param.required !== false} onCheckedChange={(checked) => handleParameterChange(index, 'required', typeof checked === 'boolean' ? checked : false)} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                             <Label htmlFor={`param-required-${index}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Required?</Label>
+                         </div>
+                    </div>
+                ))}
+                <Button variant="outline" size="sm" onClick={handleAddParameter} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}>+ Add Parameter</Button>
+            </div>
 
+             {/* Expected Output */}
+             <div className="grid w-full items-center gap-1.5">
+                <Label htmlFor="expectedOutput">Expected Output <span className="text-red-500">*</span></Label>
+                <Textarea id="expectedOutput" value={genExpectedOutput} onChange={(e) => setGenExpectedOutput(e.target.value)} placeholder="Describe the expected output format or data..." rows={3} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+            </div>
+
+             {/* Optional Fields */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="grid w-full items-center gap-1.5">
+                     <Label htmlFor="category">Category (Optional)</Label>
+                     <Input id="category" value={genCategory} onChange={(e) => setGenCategory(e.target.value)} placeholder="e.g., Web Scraping, Data Analysis" disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                 </div>
+                 <div className="grid w-full items-center gap-1.5">
+                     <Label htmlFor="additionalContext">Additional Context (Optional)</Label>
+                     <Textarea id="additionalContext" value={genAdditionalContext} onChange={(e) => setGenAdditionalContext(e.target.value)} placeholder="Any other notes for the LLM during generation..." rows={3} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                 </div>
+             </div>
               <div className="grid w-full items-center gap-1.5">
-                 <Label htmlFor="genExpectedOutput">Expected Output Description</Label>
-                 <Input id="genExpectedOutput" value={genExpectedOutput} onChange={(e) => setGenExpectedOutput(e.target.value)} placeholder="e.g., A JSON string containing a list of products." disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
-      </div>
+                 <Label htmlFor="examplesJson">Examples (Optional JSON Array)</Label>
+                 <Textarea id="examplesJson" value={genExamplesJson} onChange={(e) => setGenExamplesJson(e.target.value)} placeholder={`[ { "input": {"arg1": "value1"}, "output": "result1" } ]`} rows={4} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} />
+                 <p className="text-xs text-gray-500">Provide input/output examples as a JSON array.</p>
+             </div>
         </CardContent>
          <CardFooter className="flex flex-col items-start gap-3">
-             <div className="flex flex-wrap gap-3"> {/* Use flex-wrap */}
-                 <Button onClick={handleGenerateImplementation} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool || !genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description) }>
-                     {isGeneratingDef ? 'Generating...' : 'Generate/Regenerate Implementation'}
+              {/* Button layout/logic remains the same */}
+             <div className="flex flex-wrap gap-3">
+                 {/* Generate Button */}
+                 <Button onClick={handleGenerateImplementation} disabled={!isDefinitionFormValid || isGeneratingDef || isCreatingTool || isUpdatingTool}>
+                     {isGeneratingDef ? 'Generating...' : (hasImplementation ? 'Regenerate Implementation' : 'Generate Implementation')}
                  </Button>
-                  <Button variant="secondary" onClick={handleCreateTool} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool || !canSaveOrUpdate}>
+                  {/* Save New Button */}
+                  <Button variant="secondary" onClick={handleCreateTool} disabled={!canSaveOrUpdate || isGeneratingDef || isCreatingTool || isUpdatingTool}>
                      {isCreatingTool ? 'Saving...' : 'Save as New Tool'}
                  </Button>
-                 <Button variant="outline" onClick={handleUpdateTool} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool || !selectedToolDetails || !canSaveOrUpdate}>
+                  {/* Save Updates Button - Disabled if no tool selected */}
+                  <Button variant="outline" onClick={handleUpdateTool} disabled={!selectedToolDetails || !canSaveOrUpdate || isGeneratingDef || isCreatingTool || isUpdatingTool}>
                      {isUpdatingTool ? 'Saving...' : 'Save Updates to Selected Tool'}
                  </Button>
              </div>
-              {/* Display Area for Generation */}
+
+              {/* Status messages remain the same */}
               {genDefError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Generation Error:</strong><pre className="mt-1 text-sm">{genDefError}</pre></div>}
-              {createToolError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Creation Error:</strong><pre className="mt-1 text-sm">{createToolError}</pre></div>}
-               {createToolSuccess && <div className="text-green-600 border border-green-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Creation Success:</strong><pre className="mt-1 text-sm">{createToolSuccess}</pre></div>}
-               {updateToolError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Update Error:</strong><pre className="mt-1 text-sm">{updateToolError}</pre></div>}
-               {updateToolSuccess && <div className="text-green-600 border border-green-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Update Success:</strong><pre className="mt-1 text-sm">{updateToolSuccess}</pre></div>}
-              {generatedDefinition && (
-                 <div className="border border-gray-300 p-3 bg-gray-50 rounded w-full mt-2">
-                   <strong className="font-semibold block text-sm mb-1">Current Implementation:</strong>
-                   <pre className="mt-1 text-xs whitespace-pre-wrap break-all bg-gray-100 p-2 rounded border border-gray-200 text-gray-800">{generatedDefinition.implementation || "No implementation loaded or generated."}</pre>
+              {createToolError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Create Error:</strong><pre className="mt-1 text-sm">{createToolError}</pre></div>}
+              {createToolSuccess && <div className="text-green-700 border border-green-500 p-3 rounded w-full"><strong className="font-semibold">Success:</strong> {createToolSuccess}</div>}
+              {updateToolError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Update Error:</strong><pre className="mt-1 text-sm">{updateToolError}</pre></div>}
+              {updateToolSuccess && <div className="text-green-700 border border-green-500 p-3 rounded w-full"><strong className="font-semibold">Success:</strong> {updateToolSuccess}</div>}
+
+
+             {/* Implementation Display */}
+              {generatedDefinition?.implementation && ( // Only show the box if implementation exists
+                 <div className="border border-gray-300 p-3 bg-gray-900 text-white rounded w-full mt-2">
+                     <div className="flex justify-between items-center mb-2">
+                         <h4 className="text-sm font-semibold text-gray-300">Generated Implementation Code:</h4>
+                         {/* --- ADD DELETE BUTTON --- */}
+                         <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-900/50"
+                            onClick={handleDeleteImplementation}
+                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
+                         >
+                            Delete Implementation
+                         </Button>
+                         {/* --- END DELETE BUTTON --- */}
+                     </div>
+                     <pre className="text-xs whitespace-pre-wrap break-all overflow-x-auto max-h-[400px]">{generatedDefinition.implementation}</pre>
                  </div>
               )}
+             {/* --- ADJUST MESSAGES --- */}
+             {!hasImplementation && isDefinitionFormValid && <p className="text-sm text-blue-600 italic mt-2">Define the structure above, then click "Generate Implementation" to create the function body.</p>}
+             {!isDefinitionFormValid && <p className="text-sm text-orange-600 italic mt-2">Fill required definition fields (*) before generating/saving.</p>}
+              {/* --- END ADJUST MESSAGES --- */}
          </CardFooter>
       </Card>
 
-      {/* --- NEW Section: Refine Tool Structure --- */}
+      {/* Section 3: Refine Tool Structure - Conditionally Visible */}
       {proposedToolRequest && (
           <Card className="border-blue-300 border-2">
               <CardHeader>
                   <CardTitle className="text-blue-700">Refine Proposed Tool Structure</CardTitle>
-                  <CardDescription>Review the proposed structure. Add modification requests to refine it, or accept it to proceed.</CardDescription>
+                  <CardDescription>Review the structure generated by Quick Start. Add modification requests and click "Refine Structure" or "Accept Structure".</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                  {/* Display Proposed Structure (Read-only for now) */}
-                  <div className="space-y-2 p-3 border rounded bg-white">
-                      <h4 className="text-sm font-semibold">Proposed Name: <span className="font-mono text-blue-800">{proposedToolRequest.name}</span></h4>
-                      <p className="text-xs text-gray-600"><strong className="font-medium">Description:</strong> {proposedToolRequest.description}</p>
-                      <p className="text-xs text-gray-600"><strong className="font-medium">Purpose:</strong> {proposedToolRequest.purpose}</p>
-                      <p className="text-xs text-gray-600"><strong className="font-medium">Expected Output:</strong> {proposedToolRequest.expectedOutput}</p>
-                      <div>
-                          <strong className="font-medium text-xs block mb-1">Parameters:</strong>
-                          {proposedToolRequest.inputs.length === 0 ? (
-                              <p className="text-xs italic text-gray-500">No parameters proposed.</p>
-                          ) : (
-                              <ul className="list-disc list-inside space-y-1 pl-2">
-                                  {proposedToolRequest.inputs.map((p, i) => (
-                                      <li key={i} className="text-xs">
-                                          <span className="font-mono font-medium">{p.name}</span> ({p.type}): {p.description} {p.required === false ? '(Optional)' : ''}
-                                      </li>
-                                  ))}
-                              </ul>
-                          )}
-                      </div>
-                  </div>
+               <CardContent className="flex flex-col gap-4">
+                   {/* Display Proposed Structure */}
+                   <div className="border p-3 rounded bg-blue-50 space-y-2">
+                       <h4 className="font-semibold text-sm text-blue-800">Proposed Structure:</h4>
+                       <p className="text-xs"><strong className="font-medium">Name:</strong> {proposedToolRequest.name}</p>
+                       <p className="text-xs"><strong className="font-medium">Desc:</strong> {proposedToolRequest.description}</p>
+                       <p className="text-xs"><strong className="font-medium">Purpose:</strong> {proposedToolRequest.purpose || '(Same as description)'}</p>
+                       <p className="text-xs"><strong className="font-medium">Output:</strong> {proposedToolRequest.expectedOutput}</p>
+                       <div>
+                           <p className="text-xs font-medium mb-1">Inputs:</p>
+                           <ul className="list-disc list-inside pl-4 text-xs">
+                               {Array.isArray(proposedToolRequest.inputs) && proposedToolRequest.inputs.map((inp, i) => (
+                                   <li key={i}>{inp.name} ({inp.type}) - {inp.description} {inp.required ? '(Required)' : '(Optional)'}</li>
+                               ))}
+                                {!Array.isArray(proposedToolRequest.inputs) && <li>(No inputs defined)</li>}
+                           </ul>
+                       </div>
+                   </div>
 
-                  {/* Structure Modifications Input */}
-                  <div className="space-y-2 border p-3 rounded-md bg-blue-50">
-                      <Label className="text-md font-semibold block mb-2 text-blue-800">Structure Modification Requests (Optional)</Label>
-                      {structureModifications.length === 0 && (
-                          <p className="text-xs text-gray-500 italic">Add specific instructions to modify the structure above (e.g., "Make the 'pageNumber' parameter optional", "Rename tool to PDF_READER").</p>
-                      )}
-                      {structureModifications.map((mod, index) => (
-                          <div key={`structure-mod-${index}`} className="flex items-center gap-2">
-                              <Input
-                                  id={`structure-mod-input-${index}`}
+                   {/* Modification Requests for Structure */}
+                   <div className="border p-3 rounded-md space-y-3">
+                       <Label className="font-semibold">Refinement Requests (Optional)</Label>
+                       <p className="text-xs text-gray-500">Instruct the AI how to change the structure above (e.g., rename a parameter, make an input optional).</p>
+                       {structureModifications.map((mod, index) => (
+                           <div key={index} className="flex items-center gap-2">
+                               <Input
                                   type="text"
                                   value={mod}
                                   onChange={(e) => handleStructureModificationChange(index, e.target.value)}
-                                  placeholder={`Structure modification ${index + 1}...`}
+                                  placeholder={`e.g., Change 'pdfFilePath' to 'file_url'`}
+                                  className="flex-grow"
                                   disabled={isRefining}
-                                  className="flex-grow h-8 text-sm"
-                              />
-                              <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleRemoveStructureModification(index)}
-                                  disabled={isRefining}
-                                  aria-label="Remove structure modification"
-                                  className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 shrink-0"
-                              >
-                                  X
-                              </Button>
-                          </div>
-                      ))}
-                      <Button 
-                          onClick={handleAddStructureModification} 
-                          variant="outline"
-                          size="sm"
-                          disabled={isRefining}
-                          className="text-xs mt-2"
-                      >
-                          + Add Structure Modification
-                      </Button>
-                  </div>
-              </CardContent>
-              <CardFooter className="flex flex-col items-start gap-2">
-                  <div className="flex gap-3">
-                      <Button onClick={handleRefineStructure} disabled={isRefining || structureModifications.length === 0}>
-                          {isRefining ? 'Refining...' : 'Refine Structure'}
-                      </Button>
-                      <Button variant="secondary" onClick={handleAcceptStructure} disabled={isRefining}>
-                          Accept Structure & Proceed
-                      </Button>
-                      {/* Add Clear button during refinement */} 
-                      <Button variant="destructive" size="sm" onClick={handleClearTool} className="ml-auto">
-                           Clear / Start Over
-                      </Button>
-                  </div>
-                  {refineError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Refinement Error:</strong><pre className="mt-1 text-sm">{refineError}</pre></div>}
+                               />
+                               <Button variant="ghost" size="sm" onClick={() => handleRemoveStructureModification(index)} disabled={isRefining}>X</Button>
+                           </div>
+                       ))}
+                       <Button variant="outline" size="sm" onClick={handleAddStructureModification} disabled={isRefining}>+ Add Refinement Request</Button>
+                   </div>
+               </CardContent>
+              <CardFooter className="flex flex-wrap gap-3 items-start">
+                  <Button onClick={handleRefineStructure} disabled={isRefining}>
+                      {isRefining ? 'Refining...' : 'Refine Structure'}
+                  </Button>
+                  <Button variant="secondary" onClick={handleAcceptStructure} disabled={isRefining}>
+                      Accept Structure & Populate Definition
+                  </Button>
+                  {refineError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full basis-full"><strong className="font-semibold">Refine Error:</strong><pre className="mt-1 text-sm">{refineError}</pre></div>}
               </CardFooter>
           </Card>
       )}
-      {/* --- END Section: Refine Tool Structure --- */}
 
     </div> // End main container
   );

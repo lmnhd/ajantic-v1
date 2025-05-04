@@ -1,5 +1,5 @@
 import { generateObject, generateText } from "ai";
-import { AGENT_TOOLS_perplexity2 } from "@/src/lib/agent-tools/perplexity2";
+import { AGENT_TOOLS_perplexity2 } from "@/src/lib/agent-tools/perplexity2/perplexity2";
 import { PINECONE_deleteDocumentsByIds, PINECONE_storeData } from "../pinecone";
 import { MODEL_getModel_ai } from "@/src/lib/vercelAI-model-switcher";
 import { OpenAIModelNames } from "../model/openai";
@@ -8,7 +8,7 @@ import { z } from "zod";
 import { logger } from "@/src/lib/logger";
 import { MODEL_CONFIG } from "@/src/lib/models/model-config";
 import { UTILS_getModelArgsByName, UTILS_getModelsJSON } from "@/src/lib/utils";
-import { PERPLEXITY_getResponse } from "@/src/lib/agent-tools/perplexity";
+import { PERPLEXITY_getResponse } from "@/src/lib/agent-tools/perplexity2/perplexity";
 
 interface ResearchResult {
   title: string;

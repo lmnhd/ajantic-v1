@@ -80,7 +80,7 @@ import { AGENT_TOOLS_loadCustomTools } from "@/src/lib/agent-tools/auto-gen-tool
 import { CustomToolDefinition } from "@/src/lib/agent-tools/auto-gen-tool/tool-generator";
 
 import { AGENT_TOOLS_knowledgeBase_query, AGENT_TOOLS_pinecone } from "@/src/lib/agent-tools/pinecone-db/pinecone";
-import { AGENT_TOOLS_perplexity2 } from "@/src/lib/agent-tools/perplexity2";
+import { AGENT_TOOLS_perplexity2 } from "@/src/lib/agent-tools/perplexity2/perplexity2";
 import { AGENT_TOOLS_s3Store } from "@/src/lib/agent-tools/s3-store-tool";
 import { AGENT_TOOLS_database } from "@/src/lib/agent-tools/database-tool/database-tool";
 import { OrchestrationType2 } from "./orchestration/types";

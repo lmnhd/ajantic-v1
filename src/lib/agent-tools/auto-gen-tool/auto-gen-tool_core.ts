@@ -4,20 +4,20 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client"; // Import Prisma for error handling
 import { TextChatLogProps } from "../../text-chat-log";
 import { logger } from "@/src/lib/logger";
-import { tool } from "ai"; // Need tool here for generation
+import { tool, generateObject } from "ai"; // ** Import generateObject **
 import {
     ToolParameter,
     CustomToolDefinition,
     UTILS_buildParameterSchema
 } from "./tool-generator";
-import { generateObject } from "ai"; // Ensure generateObject is imported
-import { MODEL_getModel_ai } from "@/src/lib/vercelAI-model-switcher";
+// import { generateObject } from "ai"; // Duplicate removed
+import { MODEL_getModel_ai } from "@/src/lib/vercelAI-model-switcher"; // ** Keep this **
 import { ModelArgs, ModelProviderEnum, ToolRequest } from "@/src/lib/types"; // Consolidated imports
 import { ensureUnifiedToolRequest } from "@/src/lib/agent-tools/auto-gen-tool/tool-request-adapter";
 import { ToolRegistry } from "../tool-registry/registry";
 import { createCustomToolReference, getCustomToolId, isCustomToolReference } from "../tool-registry/custom-tool-ref";
 import { ToolFactory } from "../tool-registry/factory"; // Import ToolFactory
-
+// ** Removed unused UTILS_callLargeLanguageModel import **
 
 // --- Zod Schemas (remain the same) ---
 const toolParameterSchema = z.object({
@@ -40,91 +40,11 @@ type RefinedToolDefinition = z.infer<typeof refinedToolDefinitionSchema>;
 
 // --- Core Logic Functions ---
 
-/**
- * Creates a detailed prompt for function body generation, including instructions
- * for potential structure refinement and modification of existing implementation.
- */
-function createFunctionBodyPrompt(toolRequest: ToolRequest): string {
-  // Destructure all relevant fields, including implementation
-  const { name, description, purpose, inputs, expectedOutput, additionalContext, modificationRequests, implementation } = toolRequest;
-
-  const parametersString = inputs.map(p =>
-    `- ${p.name} (${p.type}): ${p.description}${p.required === false ? ' (optional)' : ''}`
-  ).join('\\n') || 'None';
-
-  const modificationString = modificationRequests && modificationRequests.length > 0
-    ? `\\n\\nCRITICAL MODIFICATION REQUESTS:\\nPlease apply the following modifications while generating/modifying the code:\\n${modificationRequests.map((mod, i) => `${i + 1}. ${mod}`).join('\\n')}`
-    : '';
-
-  // **** ADDED: Conditionally include current implementation ****
-  const currentImplementationString = implementation
-    ? `\\n\\n**Current Implementation (for modification):**\\n\`\`\`javascript\\n${implementation}\\n\`\`\``
-    : '\\n\\n**Note:** No previous implementation provided. Generate the first implementation based on the details.';
-  // **** END ADDED ****
-
-
-  // **** MODIFIED PROMPT INSTRUCTIONS ****
-  return `
-You are an expert JavaScript/TypeScript developer tasked with creating OR MODIFYING the function body for a custom tool.
-Your goal is to generate a robust, efficient, and correct standalone async function implementation based ONLY on the provided details.
-
-**Tool Details:**
-*   **Name:** ${name}
-*   **Description:** ${description}
-*   **Purpose:** ${purpose || description}
-*   **Input Parameters:**
-${parametersString}
-*   **Expected Output:** ${expectedOutput}
-${additionalContext ? `*   **Additional Context:** ${additionalContext}` : ''}
-${currentImplementationString} // **** Insert current implementation or note here ****
-${modificationString}
-
-**Instructions:**
-
-1.  **Generate/Modify Implementation:** Write the complete JavaScript/TypeScript async function body.
-    *   **If 'Current Implementation' is provided:** Use it as your starting point and apply the necessary changes based on the tool details and modification requests. Focus on modifying the existing code.
-    *   **If no 'Current Implementation' is provided:** Generate the function body from scratch based on the details.
-    *   **CRITICAL FORMAT:** The implementation MUST be an asynchronous arrow function expression that accepts a single object argument destructuring the parameters. It MUST start exactly like: \`async ({ ${inputs.map(p => p.name).join(', ')} }) => {\` followed by the function body and ending with \`}\`.
-    *   **DO NOT** include a standard function declaration like \`function ${name}(...)\` or \`async function ${name}(...)\`. ONLY provide the arrow function expression as described.
-    *   Use standard Node.js built-in modules ONLY if absolutely necessary (like 'fs', 'path', 'crypto'). AVOID external libraries unless explicitly requested.
-    *   Include error handling (try/catch blocks inside the arrow function body).
-    *   Return a value matching the 'Expected Output' description. Return \`{ success: false, error: 'message' }\` on failure from within the arrow function body.
-    *   Focus on clear, readable, and correct code. Ensure the final code aligns with ALL instructions, especially the modification requests.
-
-2.  **Refine Structure (If Necessary):** Review the parameters and output. If modifications are needed based on the purpose or requests, update the \`inputs\` array or \`expectedOutput\` string in your JSON response. Ensure the parameter destructuring in your generated \`implementation\` string matches the *final* \`inputs\` you return. If no structural changes are needed, return the original details.
-
-3.  **Output Format:** Respond ONLY with a JSON object matching the required schema, containing the potentially refined \`name\`, \`description\`, \`inputs\`, \`expectedOutput\`, and the final \`implementation\` string (which must be the async arrow function expression).
-
-**Example Implementation Format:**
-\`\`\`javascript
-async ({ param1, optionalParam }) => {
-  try {
-    // Your code here using param1 and optionalParam
-    const result = await someAsyncTask(param1);
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('Tool execution failed:', error);
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-\`\`\`
-
-**Constraint Checklist & Confidence Score:**
-1. Implementation is an async arrow function \`async ({...}) => { ... }\`? Yes
-2. Returned data matches expected output description? Yes
-3. Handled potential errors within the function body? Yes
-4. Avoided external libraries (unless explicitly requested)? Yes
-5. If modifying, based changes on Current Implementation? Yes/No/NA // **** ADDED Checklist Item ****
-6. Confidence Score (1-5): 5
-
-Provide ONLY the JSON output.
-`;
-// **** END MODIFIED PROMPT INSTRUCTIONS ****
-}
+// ** Removed unused createFunctionBodyPrompt function **
 
 /**
  * Generates a custom tool definition, including the function implementation,
- * based on a detailed request. It may refine the input/output structure.
+ * based on a detailed request using the XML-style prompt and generateObject.
  *
  * @param toolRequest - The detailed request for the tool.
  * @param modelArgs - The model arguments for generation.
@@ -137,53 +57,131 @@ export async function CORE_generateCustomToolDefinition(
 ): Promise<RefinedToolDefinition> {
   logger.info(`CORE: Generating definition & implementation for: ${toolRequest.name} using model ${modelArgs.modelName}`);
 
-  // Ensure the request is in the unified format
-  const unifiedRequest = await ensureUnifiedToolRequest(toolRequest);
+  // Ensure the request is in the unified format (optional, depends on if you need adapter)
+  // const unifiedRequest = await ensureUnifiedToolRequest(toolRequest);
+  const request = toolRequest; // Using toolRequest directly if adapter is not needed here
 
-  // --- Use passed modelArgs ---
-  // const modelName = "openai:gpt-4o"; // REMOVE Hardcoded model
-  // const modelArgs = UTILS_getModelArgsByName(modelName); // REMOVE 
-  if (!modelArgs) { // Keep validation for passed args
-      // Or handle default if modelArgs is not provided? For now, assume it's required.
-      throw new Error(`Model arguments were not provided for generation.`);
-  }
-  const model = await MODEL_getModel_ai(modelArgs);
-  // --- End Use passed modelArgs ---
+  // --- Input Validation ---
+  if (!request || !request.name || !request.description || !request.inputs || !request.expectedOutput) {
+        logger.error("CORE: Invalid ToolRequest received in CORE_generateCustomToolDefinition", { request });
+        throw new Error("Invalid ToolRequest: Missing required fields (name, description, inputs, expectedOutput).");
+    }
+    if (!modelArgs || !modelArgs.modelName || !modelArgs.provider) {
+         logger.error("CORE: Invalid ModelArgs received in CORE_generateCustomToolDefinition", { modelArgs });
+        throw new Error("Invalid ModelArgs: Missing required fields (modelName, provider).");
+    }
+  // --- End Input Validation ---
 
-  const prompt = createFunctionBodyPrompt(unifiedRequest);
+  // --- Prepare Prompt Components ---
+  const parametersString = request.inputs.length > 0
+        ? request.inputs.map(p => `- ${p.name} (${p.type}): ${p.description}${p.required === false ? ' (optional)' : ''}${p.default !== undefined ? ` (default: ${JSON.stringify(p.default)})` : ''}`).join('\n')
+        : '  (No input parameters defined)';
 
-  logger.debug(`CORE: Generation Prompt for ${toolRequest.name}:\n${prompt}`);
+  // --- XML-Style System Prompt ---
+  const systemPrompt = `
+You are an expert JavaScript/TypeScript developer tasked with creating OR MODIFYING the function body for a custom tool.
+Your goal is to generate a robust, efficient, and correct standalone async function implementation based ONLY on the provided details.
 
-  logger.prompt(prompt)
+<instructions>
+1.  **Generate/Modify Implementation:** Write the complete JavaScript/TypeScript async function body.
+    *   If '<current_implementation>' is provided below, use it as your starting point and apply the necessary changes based on the tool details and any '<modification_requests>'. Focus on modifying the existing code.
+    *   If no '<current_implementation>' is provided, generate the function body from scratch based on the '<tool_details>'.
+    *   **CRITICAL FORMAT:** The implementation MUST be an asynchronous arrow function expression that accepts a single object argument destructuring the parameters defined in '<tool_details>'. It MUST start exactly like: \`async ({ ${request.inputs.map(p => p.name).join(', ')} }) => {\` (using the actual parameter names) followed by the function body and ending with \`}\`.
+    *   **DO NOT** include a standard function declaration like \`function toolName(...)\` or \`async function toolName(...)\`. ONLY provide the arrow function expression as described.
+    *   Use standard Node.js built-in modules ONLY if absolutely necessary (like 'fs', 'path', 'crypto'). AVOID external libraries unless explicitly requested in '<modification_requests>' or '<tool_details>'. Check '<additional_context>' for allowed helper functions (e.g., executeFirecrawlScrape, executeVisualScrape) and import them if needed (e.g., from '@/src/lib/agent-tools/helpers/...').
+    *   Include error handling (try/catch blocks inside the arrow function body).
+    *   Return a value matching the 'Expected Output' description in '<tool_details>'. Return \`{ success: false, error: 'message' }\` on failure from within the arrow function body.
+    *   Focus on clear, readable, and correct code. Ensure the final code aligns with ALL instructions, especially modification requests.
+
+2.  **Refine Structure (If Necessary):** Review the parameters and output details. If modifications are needed based on the purpose or requests, update the \`inputs\` array or \`expectedOutput\` string in your JSON response. Ensure the parameter destructuring in your generated \`implementation\` string matches the *final* \`inputs\` you return. If no structural changes are needed, return the original details.
+
+3.  **Output Format:** Respond ONLY with a JSON object matching the required schema (${refinedToolDefinitionSchema.description}), containing the potentially refined \`name\`, \`description\`, \`inputs\`, \`expectedOutput\`, and the final \`implementation\` string (which must be the async arrow function expression).
+</instructions>
+
+<example_implementation_format>
+\`\`\`javascript
+async ({ param1, optionalParam }) => {
+  // Optional: Import helpers if needed and allowed
+  // const { executeVisualScrape } = await import('@/src/lib/agent-tools/helpers/visual-scraping');
 
   try {
+    // Your code here using param1 and optionalParam
+    const result = await someAsyncTask(param1);
+    // Ensure the returned structure matches the 'Expected Output' description
+    return { success: true, data: result };
+  } catch (error) {
+    console.error('Tool execution failed:', error);
+    // Provide a user-friendly error message if possible
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+\`\`\`
+</example_implementation_format>
+
+<constraint_checklist>
+1. Implementation is an async arrow function \`async ({...}) => { ... }\`? Yes
+2. Returned data structure matches expected output description? Yes
+3. Handled potential errors within the function body? Yes
+4. Avoided external libraries (unless explicitly requested/allowed)? Yes
+5. If modifying, based changes on Current Implementation? Yes/No/NA
+6. Confidence Score (1-5): [Score]
+</constraint_checklist>
+
+--- TOOL INFORMATION FOLLOWS ---
+
+<tool_details>
+*   **Name:** ${request.name}
+*   **Description:** ${request.description}
+*   **Purpose:** ${request.purpose || request.description}
+*   **Input Parameters:**
+${parametersString}
+*   **Expected Output:** ${request.expectedOutput}
+</tool_details>
+
+${request.additionalContext ? `<additional_context>\n${request.additionalContext}\n</additional_context>` : ''}
+
+<current_implementation>
+${request.implementation ? `\`\`\`javascript\n${request.implementation}\n\`\`\`` : '(None provided - generate from scratch)'}
+</current_implementation>
+
+${request.modificationRequests && request.modificationRequests.length > 0 ? `<modification_requests>\n*   ${request.modificationRequests.join('\n*   ')}\n</modification_requests>` : ''}
+
+Provide ONLY the JSON output matching the schema.
+`;
+  // --- End XML-Style System Prompt ---
+
+  logger.debug(`CORE: Generation Prompt for ${request.name}`);
+  // logger.prompt(systemPrompt) // Optional: Log full prompt if needed for debugging
+
+  try {
+    // Get the Vercel AI SDK model object
+    const model = await MODEL_getModel_ai(modelArgs);
+
+    // Call generateObject using the consistent pattern
     const { object: generatedDefinition } = await generateObject({
       model: model,
-      schema: refinedToolDefinitionSchema, // --- Use the restored schema ---
-      prompt: prompt,
-      //mode: "json",
-      // Pass relevant model settings from modelArgs if needed by generateObject
-      temperature: modelArgs.temperature, // Example: pass temperature
-      // ...modelArgs, // Avoid spreading potentially incompatible args directly? Check generateObject options.
+      schema: refinedToolDefinitionSchema, // Use the Zod schema for the output
+      prompt: systemPrompt, // Pass the full prompt
+      // Note: Depending on the provider/model, 'prompt' might be used,
+      // or you might need to separate into 'system' and 'prompt'/'user'
+      // Adjust based on MODEL_getModel_ai and generateObject behavior
+      temperature: modelArgs.temperature, // Pass temperature
+      // Add other relevant modelArgs if supported by generateObject and the model
+      // maxTokens: modelArgs.maxOutputTokens, // Example
     });
 
     logger.info(`CORE: Successfully generated definition & implementation for: ${generatedDefinition.name}`);
     logger.debug("CORE: Generated Object:", generatedDefinition);
 
     // --- START Validation of generated object ---
+    // Basic validation (can enhance further)
     if (!generatedDefinition.implementation || generatedDefinition.implementation.trim() === '') {
         throw new Error("Generated implementation is empty.");
     }
     if (!Array.isArray(generatedDefinition.inputs)) {
-        // Attempt fallback if 'inputs' is missing but 'parameters' exists
-        if (Array.isArray((generatedDefinition as any).parameters)) {
-             logger.warn(`CORE: Generated definition missing 'inputs', using 'parameters' field instead for tool ${generatedDefinition.name}`);
-             generatedDefinition.inputs = (generatedDefinition as any).parameters;
-        } else {
-             throw new Error("Generated 'inputs' field is not an array and 'parameters' fallback is not available/valid.");
-        }
+        throw new Error("Generated 'inputs' field is not an array.");
     }
-    // Validate structure of each input parameter
+    // Validate structure of each input parameter using Zod schema
     generatedDefinition.inputs.forEach((input: any, index: number) => {
         const validationResult = toolParameterSchema.safeParse(input);
         if (!validationResult.success) {
@@ -194,17 +192,22 @@ export async function CORE_generateCustomToolDefinition(
     });
     // --- END Validation ---
 
-    return generatedDefinition as RefinedToolDefinition; // Cast after validation
+    // Cast is safe here after successful parsing and validation against the schema
+    return generatedDefinition as RefinedToolDefinition;
 
   } catch (error) {
-    logger.error(`CORE: Failed to generate definition/implementation for ${toolRequest.name}`, { error });
+    logger.error(`CORE: Failed to generate definition/implementation for ${request.name}`, {
+        error: error instanceof Error ? error.message : String(error),
+        modelArgs: modelArgs // Log args used during failure
+    });
     if (error instanceof Error) {
         if ((error as any).cause) {
             logger.error("CORE: Generation Error Cause:", (error as any).cause);
         }
-        throw new Error(`Failed to generate tool '${toolRequest.name}': ${error.message}`);
+        // Re-throw a more specific error message
+        throw new Error(`Failed to generate tool '${request.name}' using model ${modelArgs.modelName}: ${error.message}`);
     } else {
-        throw new Error(`Failed to generate tool '${toolRequest.name}': An unknown error occurred.`);
+        throw new Error(`Failed to generate tool '${request.name}' using model ${modelArgs.modelName}: An unknown error occurred.`);
     }
   }
 }
@@ -221,17 +224,16 @@ export async function CORE_generateCustomToolDefinition(
  */
 export async function CORE_createToolFromRequest(
   toolRequest: ToolRequest,
-  userId: string, // Removed agentName
+  userId: string,
   modelArgs: ModelArgs
 ): Promise<{ success: boolean; message: string; toolRef?: string; toolId?: string; definition?: RefinedToolDefinition; errorDetails?: string }> {
   try {
     logger.info(`CORE: Creating tool from request for user '${userId}': ${toolRequest.name}`);
     const refinedDefinition = await CORE_generateCustomToolDefinition(toolRequest, modelArgs);
 
-    // Prepare generic metadata, removing agentId
+    // Prepare generic metadata
     const metadata: { [key: string]: any } = {
-        // agentId: agentName, // REMOVED
-        userId: userId, // Keep userId in metadata for potential logging/reference consistency
+        userId: userId,
         source: "playground-created",
         createdAt: new Date().toISOString(),
         purpose: toolRequest.purpose,
@@ -243,13 +245,13 @@ export async function CORE_createToolFromRequest(
 
     // Register tool for the user
     const toolRef = await ToolRegistry.registerTool(
-      userId, // Pass userId directly
+      userId,
       refinedDefinition.name,
       refinedDefinition.description,
-      refinedDefinition.inputs,
+      refinedDefinition.inputs, // Pass the potentially refined inputs
       refinedDefinition.implementation,
       "function",
-      metadata // Pass generic metadata
+      metadata
     );
 
     const toolId = getCustomToolId(toolRef); // Use helper to extract ID
@@ -278,14 +280,18 @@ export async function CORE_createToolFromRequest(
     if (error instanceof Error && error.message.includes("already exists for this user")) {
         return {
             success: false,
-            message: error.message, // Use the specific error message
+            message: error.message,
             errorDetails: error.message
         };
     }
+    // Handle potential Prisma-related errors during registration if needed
+    // if (error instanceof Prisma.PrismaClientKnownRequestError) { ... }
+
+    // General error return
     return {
       success: false,
       message: `Error creating tool '${toolRequest.name}': ${error.message || "Unknown error"}`,
-      errorDetails: error.message
+      errorDetails: error.message // Provide error details for frontend if helpful
     };
   }
 }
@@ -299,17 +305,16 @@ export async function CORE_createToolFromRequest(
  */
 export async function CORE_createToolsFromRequests(
   toolRequests: ToolRequest[],
-  userId: string // Removed agentName
+  userId: string
 ): Promise<Record<string, { success: boolean; message: string; toolRef?: string; toolId?: string; definition?: RefinedToolDefinition }>> {
     const results: Record<string, any> = {};
     for (const request of toolRequests) {
-        // Provide default ModelArgs (adjust as needed)
+        // Provide default ModelArgs (adjust as needed or ensure they are passed in)
         const defaultModelArgs: ModelArgs = {
             provider: ModelProviderEnum.OPENAI,
-            modelName: "gpt-4o", // Ensure this matches your default model identifier if different
+            modelName: "gpt-4o", // Or your preferred default
             temperature: 0.7
         };
-        // Pass userId instead of agentName
         const result = await CORE_createToolFromRequest(request, userId, defaultModelArgs);
         results[request.name] = result;
     }
@@ -318,11 +323,38 @@ export async function CORE_createToolsFromRequests(
 
 
 // --- Removed Agent-Specific Caching ---
-// Remove getAgentToolsRegistry, agentToolsRegistry, __loadedTools declaration
-// Remove loadToolsAndBuildRegistry
 
 
 // CORE_generateDynamicToolWrapper remains useful for ToolFactory, keep it.
+// ** This function seems missing from previous versions, but let's assume it exists **
+// ** or should be added if ToolFactory depends on it. Add placeholder if needed. **
+/*
+export function CORE_generateDynamicToolWrapper(implementationCode: string, parametersSchema: z.ZodObject<any, any>): (args: any) => Promise<any> {
+    // Implementation to evaluate the code string and create the execution wrapper
+    // Be extremely careful with eval or similar approaches due to security risks.
+    // Consider using safer alternatives like vm2 if possible.
+    logger.warn("CORE_generateDynamicToolWrapper: Using dynamic code execution. Ensure security measures are in place.");
+    // Placeholder implementation:
+    try {
+        // This is a simplified and potentially insecure example.
+        // You'll need a robust and secure way to execute this code.
+        const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+        const toolFunction = new AsyncFunction('args', `
+            const toolLogic = ${implementationCode};
+            return toolLogic(args);
+        `);
+
+        return async (args: any) => {
+            // Validate args against parametersSchema before executing
+            const validatedArgs = parametersSchema.parse(args);
+            return await toolFunction(validatedArgs);
+        };
+    } catch (error) {
+        logger.error("Failed to generate dynamic tool wrapper", { error });
+        throw new Error("Failed to create executable tool function from implementation code.");
+    }
+}
+*/
 
 
 // --- Deprecated / Legacy ---
@@ -332,24 +364,28 @@ export async function CORE_createToolsFromRequests(
  * Creates a custom tool directly from provided parameters for a specific user.
  */
 export async function CORE_createTool(
-  // removed agentName
   userId: string,
   textChatLogs: TextChatLogProps[] | null,
   params: any // Consider defining a specific type/schema
 ) {
   logger.warn("CORE_createTool is deprecated, use CORE_createToolFromRequest or ToolRegistry.registerTool");
    try {
-    if (!params.name || !params.description || !params.parameters || !params.functionBody) {
-      return {
-        success: false,
-        message: "Missing required parameters (name, description, parameters, functionBody)"
-      };
+    // Basic validation for required fields in params
+    const requiredFields = ['name', 'description', 'parameters', 'functionBody'];
+    for (const field of requiredFields) {
+        if (!params[field]) {
+            return { success: false, message: `Missing required parameter: ${field}` };
+        }
+    }
+    if (!Array.isArray(params.parameters)) {
+         return { success: false, message: "Parameter 'parameters' must be an array." };
     }
 
-    const parameters = Array.isArray(params.parameters) ? params.parameters.map((param: any) => ({
+
+    const parameters = params.parameters.map((param: any) => ({
       name: param.name, type: param.type, description: param.description,
       required: param.required !== false, default: param.default
-    })) : [];
+    }));
 
     const paramsValidation = toolParametersSchema.safeParse(parameters);
     if (!paramsValidation.success) {
@@ -358,35 +394,33 @@ export async function CORE_createTool(
 
     // Prepare generic metadata
     const metadata = {
-        // agentId: agentName, // REMOVED
-        userId: userId, // Keep for reference
-        source: "agent-created",
+        userId: userId,
+        source: "agent-created-deprecated", // Indicate source
         createdAt: new Date().toISOString(),
         category: params.category
     };
 
     // Register the tool directly using the user ID
     const toolRef = await ToolRegistry.registerTool(
-      userId, // Pass userId directly
+      userId,
       params.name,
       params.description,
-      paramsValidation.data,
+      paramsValidation.data, // Use validated data
       params.functionBody,
       "function",
-      metadata // Pass generic metadata
+      metadata
     );
 
     const toolId = getCustomToolId(toolRef);
 
     logger.tool("Created custom tool (CORE_createTool - deprecated)", {
-      toolName: params.name, toolId, userId // Log userId
+      toolName: params.name, toolId, userId
     });
 
     if (textChatLogs?.push) {
       textChatLogs.push({
         role: "system",
-        message: `Created custom tool "${params.name}" with reference ${toolRef}`,
-        // agentName // Removed agentName
+        message: `Created custom tool (deprecated method) "${params.name}" with reference ${toolRef}`,
       });
     }
 
@@ -394,14 +428,20 @@ export async function CORE_createTool(
       success: true,
       toolRef: toolRef,
       toolId: toolId,
-      message: `Tool ${params.name} created successfully and registered with ID ${toolId}.`
+      message: `Tool ${params.name} created successfully (using deprecated method) and registered with ID ${toolId}.`
     };
   } catch (error: any) {
     logger.error("Error creating custom tool (CORE_createTool - deprecated)", {
-      error: error.message || "Unknown error", toolName: params.name, userId
+      error: error.message || "Unknown error", toolName: params?.name || 'Unknown', userId
     });
      if (error instanceof Error && error.message.includes("already exists for this user")) {
         return { success: false, message: error.message };
+    }
+     // Catch potential Prisma errors during registration
+     if (error instanceof Prisma.PrismaClientKnownRequestError) {
+         // Log specific Prisma error code if helpful
+         logger.error("Prisma Error during deprecated tool creation", { code: error.code });
+         return { success: false, message: `Database error during tool creation: ${error.message}` };
     }
     return {
       success: false,
@@ -414,7 +454,6 @@ export async function CORE_createTool(
  * Lists tools for a specific user, optionally filtered by category.
  */
 export const CORE_listTools = async (
-  // removed agentName
   userId: string,
   textChatLogs: TextChatLogProps[] | null,
   params: { category?: string }
@@ -424,54 +463,66 @@ export const CORE_listTools = async (
 
   if (textChatLogs?.push) {
       textChatLogs.push({
-        role: "function", // Or system?
+        role: "system", // More appropriate than 'function' for internal logging
         message: `CORE: Listing custom tools for user ${userId}${category ? ` in category: ${category}` : ''}`,
-        // agentName, // Removed agentName
         timestamp: new Date()
       });
   }
 
   try {
     // Use ToolRegistry to list tools for the specific user
-    const toolsList = await ToolRegistry.listAllTools(userId); // Pass userId
+    const toolsList = await ToolRegistry.listAllTools(userId);
 
     // Filter locally by category if provided
     const filteredTools = category
         ? toolsList.filter(tool => {
             try {
+                // Safely parse metadata
                 const meta = tool.metadata ? JSON.parse(tool.metadata) : {};
                 return meta.category === category;
-            } catch { return false; }
+            } catch(e) {
+                logger.warn(`CORE listTools: Failed to parse metadata for tool ID ${tool.id}`, { metadata: tool.metadata, error: e });
+                return false;
+             }
         })
         : toolsList;
 
 
-    // Map to the expected format
+    // Map to the expected format, ensuring parameters are parsed safely
     const formattedTools = filteredTools.map(tool => {
         let parsedMetadata: Record<string, any> = {};
         try {
             if (tool.metadata) parsedMetadata = JSON.parse(tool.metadata);
         } catch (e) {
-            logger.warn(`CORE listTools: Failed to parse metadata for tool ${tool.name}`, { metadata: tool.metadata });
+            logger.warn(`CORE listTools: Failed to parse metadata again for tool ID ${tool.id}`, { metadata: tool.metadata });
         }
         let parsedParameters: ToolParameter[] = [];
         try {
-            if (tool.parameters) parsedParameters = JSON.parse(tool.parameters);
-            if (!Array.isArray(parsedParameters)) parsedParameters = [];
+            if (tool.parameters) {
+                const parsed = JSON.parse(tool.parameters);
+                 // Validate that parsed is an array of objects matching the schema
+                const validationResult = toolParametersSchema.safeParse(parsed);
+                if (validationResult.success) {
+                    parsedParameters = validationResult.data;
+                } else {
+                    logger.warn(`CORE listTools: Parsed parameters for tool ID ${tool.id} failed schema validation`, { parameters: tool.parameters, error: validationResult.error });
+                }
+            }
         } catch (e) {
-            logger.warn(`CORE listTools: Failed to parse parameters for tool ${tool.name}`, { parameters: tool.parameters });
+            logger.warn(`CORE listTools: Failed to parse parameters JSON for tool ID ${tool.id}`, { parameters: tool.parameters, error: e });
         }
         return {
             name: tool.name,
             description: tool.description,
-            parameters: parsedParameters,
-            category: parsedMetadata?.category || 'DEFAULT',
-            id: tool.id
+            parameters: parsedParameters, // Use safely parsed parameters
+            category: parsedMetadata?.category || 'DEFAULT', // Provide default category
+            id: tool.id,
+            reference: createCustomToolReference(tool.id) // Include reference
         }
     });
 
     logger.tool("CORE: Listed Tools Successfully for user", { userId, count: formattedTools.length, category: category || 'all' });
-    return JSON.stringify({
+    return JSON.stringify({ // Return JSON string as before if required by caller
       success: true,
       tools: formattedTools
     });
@@ -479,7 +530,7 @@ export const CORE_listTools = async (
     logger.error("CORE: Listing Tools Failed for user", {
       userId, error: error instanceof Error ? error.message : "Unknown error", category
     });
-    return JSON.stringify({
+    return JSON.stringify({ // Return JSON string as before if required by caller
       success: false,
       error: error instanceof Error ? error.message : "Failed to list tools"
     });
@@ -491,31 +542,29 @@ export const CORE_listTools = async (
  * Executes a specific custom tool identified by its reference, using ToolFactory.
  */
 export const CORE_executeTool = async (
-    // removed agentName
     textChatLogs: TextChatLogProps[] | null,
     params: { toolRef: string; toolArgs?: Record<string, any> }
 ): Promise<any> => {
   const { toolRef, toolArgs = {} } = params;
-  const toolNameFromRef = toolRef; // For logging before resolution
+  let toolNameForLogging = toolRef; // Initial value for logging
 
-  if (!toolRef || !toolRef.includes(':')) {
+  if (!toolRef || typeof toolRef !== 'string' || !toolRef.includes(':')) {
       logger.error("CORE Execute: Invalid toolRef format", { toolRef });
-      return { success: false, error: "Invalid tool reference format. Expected 'type:id'."}; // Return object
+      return { success: false, _isToolError: true, error: "Invalid tool reference format. Expected 'type:id'."};
   }
 
   // Check if it's specifically a custom tool ref
   if (!isCustomToolReference(toolRef)) {
       logger.error("CORE Execute: toolRef is not a custom tool reference", { toolRef });
-       return { success: false, error: `Reference '${toolRef}' is not a valid custom tool reference.`}; // Return object
+       return { success: false, _isToolError: true, error: `Reference '${toolRef}' is not a valid custom tool reference.`};
   }
 
-  logger.tool("CORE Execute: Attempting execution", { toolRef, args: JSON.stringify(toolArgs) });
+  logger.tool("CORE Execute: Attempting execution", { toolRef, args: toolArgs }); // Log args directly
 
   if (textChatLogs?.push) {
     textChatLogs.push({
-      role: "function",
+      role: "system", // More appropriate than 'function'
       message: `CORE: Executing custom tool: "${toolRef}"`,
-      // agentName, // Removed agentName
       timestamp: new Date()
     });
   }
@@ -524,45 +573,52 @@ export const CORE_executeTool = async (
     // 1. Get tool ID from reference
     const toolId = getCustomToolId(toolRef);
     if (!toolId) {
+        // This case should ideally be caught by isCustomToolReference, but check again
         throw new Error(`Could not extract tool ID from reference: ${toolRef}`);
     }
 
     // 2. Fetch tool definition directly from the registry using ID
     const toolEntry = await ToolRegistry.getToolById(toolId);
     if (!toolEntry) {
-      throw new Error(`Custom tool with reference ${toolRef} (ID: ${toolId}) not found.`);
+      throw new Error(`Custom tool with reference ${toolRef} (ID: ${toolId}) not found in registry.`);
     }
-    const toolName = toolEntry.name; // Get name from the entry
+    toolNameForLogging = toolEntry.name; // Update name for logging
 
     // 3. Build the executable tool using ToolFactory
     const toolObject = ToolFactory.buildTool(toolEntry);
-    const executableTool = toolObject[toolName]; // Extract the ai.tool object
+    const executableTool = toolObject[toolNameForLogging]; // Extract the ai.tool object
 
     if (!executableTool || typeof executableTool.execute !== 'function') {
-      logger.error("CORE Execute: Failed to build executable tool object", { toolRef, toolName });
-      throw new Error(`Failed to build executable tool '${toolName}' from definition.`);
+      logger.error("CORE Execute: Failed to build executable tool object from factory", { toolRef, toolName: toolNameForLogging });
+      throw new Error(`Failed to build executable tool '${toolNameForLogging}' from definition.`);
     }
 
     // 4. Execute the tool
-    logger.tool(`CORE Execute: Calling execute on tool '${toolName}' (Ref: ${toolRef})`);
+    logger.tool(`CORE Execute: Calling execute on tool '${toolNameForLogging}' (Ref: ${toolRef})`);
     const result = await executableTool.execute(toolArgs);
+    // The result here might already contain { success: boolean, ... } if the tool implementation follows that pattern
+    // Or it might be the raw return value, or an error thrown by the implementation.
+    // The wrapper in ToolFactory likely handles errors thrown by the implementation.
 
-    logger.tool(`CORE Execute: Execution complete for '${toolName}'`, { success: !(result?._isToolError === true) });
+    logger.tool(`CORE Execute: Execution complete for '${toolNameForLogging}'`, { success: !(result?._isToolError === true), hasResult: result !== undefined });
 
     // Return result (could be success data or the structured error from the wrapper)
-    return result; // Return the object directly
+    return result; // Return the object/value directly
 
   } catch (error) {
+    // This catch block handles errors *outside* the tool's own try/catch,
+    // e.g., tool not found, factory build failure, potentially errors during execute if not caught by wrapper.
     logger.error("CORE Execute: Execution Failed", {
       toolRef,
-      toolName: toolNameFromRef,
-      error: error instanceof Error ? error.message : "Unknown error"
+      toolName: toolNameForLogging,
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined
     });
     // Return a structured error object
     return {
       success: false,
       _isToolError: true, // Consistent error flag
-      error: `Failed to execute tool "${toolNameFromRef}": ${error instanceof Error ? error.message : "Unknown error"}`
+      error: `Failed to execute tool "${toolNameForLogging}": ${error instanceof Error ? error.message : "Unknown error"}`
     };
   }
 };

@@ -23,7 +23,7 @@ import { z } from "zod";
 import { PROMPT_AUTO_GENERATE_WORKFLOW } from "@/src/lib/prompts/autogen-workflow-prompt";
 import { generateObject, generateText } from "ai";
 import { MODEL_getModel_ai } from "@/src/lib/vercelAI-model-switcher";
-import { PERPLEXITY_getResponse } from "../agent-tools/perplexity";
+import { PERPLEXITY_getResponse } from "../agent-tools/perplexity2/perplexity";
 import { AGENT_AUTO_PROMPT } from "@/src/lib/prompts/auto-prompt";
 import { CORE_generateCustomToolDefinition } from "../agent-tools/auto-gen-tool/auto-gen-tool_core";
 import { AGENT_TOOLS_loadCustomTools } from "../agent-tools/auto-gen-tool/load-custom-tools";
@@ -536,6 +536,7 @@ export const TEAM_autogen_create_agent = async (
               );
               
               toolRef = await ToolRegistry.registerTool(
+                userId,
                 toolDef.name,
                 toolDef.description,
                 toolDef.inputs,

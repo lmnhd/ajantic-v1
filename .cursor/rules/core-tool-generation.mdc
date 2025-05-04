@@ -1,0 +1,15 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Core Tool Implementation Generation
+
+This rule focuses on how the JavaScript/TypeScript code for custom tools is generated.
+
+- **Central Logic:** The core function responsible for generating the actual tool implementation code (the async arrow function) is `CORE_generateCustomToolDefinition` located in ([src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts](mdc:ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts)).
+- **AI Interaction:** This function uses the Vercel AI SDK's `generateObject` function to call the LLM, ensuring the output matches the `refinedToolDefinitionSchema`. See the usage pattern within the function.
+- **Prompt Structure:** It utilizes a detailed system prompt with XML-style tags (`<instructions>`, `<tool_details>`, `<additional_context>`, etc.) to guide the LLM.
+- **Context Utilization:** Critically, the prompt includes the `<additional_context>` tag, which incorporates analysis results from the Scraper Consultant or other relevant context provided by the user/system.
+- **API Trigger:** This core function is invoked by the API route at ([src/app/api/playground/generate-tool-definition/route.ts](mdc:ajantic-v1/src/app/api/playground/generate-tool-definition/route.ts)).
+

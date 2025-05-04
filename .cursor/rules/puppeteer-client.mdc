@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Puppeteer/Browserbase Client
+
+This rule explains the setup for browser automation used in advanced scraping.
+
+- **Client Logic:** The core logic for interacting with either a local Puppeteer instance or the Browserbase service (for Vercel/production environments) is encapsulated in ([src/lib/puppeteer_client.ts](mdc:ajantic-v1/src/lib/puppeteer_client.ts)).
+- **Environment Switching:** This client contains logic to switch between local execution (`puppeteer-core`) and the Browserbase API based on environment variables (e.g., `BROWSERBASE_API_KEY`, `NODE_ENV`).
+- **Usage:** This client is intended to be used by runtime helpers that require full browser rendering or automation, such as the visual scraping helper (likely located in `src/lib/agent-tools/helpers/`).
+

@@ -1,0 +1,15 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Scraper Consultant Workflow
+
+This rule describes the process for analyzing website scraping viability before generating a custom tool.
+
+1. **Frontend Trigger:** The analysis starts in the Custom Tool Playground UI ([src/app/playground/custom-tool/page.tsx](mdc:ajantic-v1/src/app/playground/custom-tool/page.tsx)). The user provides a URL and optional data description.
+2. **Backend Analysis API:** The frontend calls the API route at ([src/app/api/playground/analyze-scraping/route.ts](mdc:ajantic-v1/src/app/api/playground/analyze-scraping/route.ts)) to perform the analysis.
+3. **Analysis Logic:** The API route uses helper functions within its directory (like `_types.ts`, `_firecrawl-helper.ts`, `_selector-generator.ts`) to perform checks (preliminary fetch, Firecrawl, selector generation).
+4. **Context Passing:** The analysis results (suggested method, issues, selectors) are returned to the frontend. If the user chooses, these results populate the "Additional Context" field in the Tool Definition section.
+5. **Informing Generation:** This "Additional Context" is then passed to the core tool generation logic ([src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts](mdc:ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts)) via the ([src/app/api/playground/generate-tool-definition/route.ts](mdc:ajantic-v1/src/app/api/playground/generate-tool-definition/route.ts)) API, influencing the generated implementation code.
+

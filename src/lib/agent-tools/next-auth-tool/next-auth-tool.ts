@@ -19,7 +19,7 @@ import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { TOOLFUNCTION_split_text } from "@/src/app/api/tools/splitters";
 import { detectFileType, parseContentByType } from "@/src/lib/utils/file-type-detection";
-import { PERPLEXITY_getResponse } from "../perplexity";
+import { PERPLEXITY_getResponse } from "../perplexity2/perplexity";
 
 
 // TODO: Auto Context Builder - during post analysis, auto extract any important info and add to the context with zero visibility to agents

@@ -17,7 +17,7 @@ import { AGENT_TOOLS_DOCUMENT_PARSE_DIRECTIVE } from "../agent-tools/documents-t
 import { AGENT_TOOLS_DYNAMIC_ACTION_getAllCustomScriptsForAgent } from "../agent-tools/dynamic-tool/dynamic-action-core";
 import { AGENT_TOOLS_DIRECTIVE_DOCUMENT_PROCESSOR } from "../agent-tools/documents-tools/document-processor";
 import { AGENT_TOOLS_DIRECTIVE_KNOWLEDGE_BASE } from "../agent-tools/knowledgebase-tool/kb-tool";
-import { AGENT_TOOLS_DIRECTIVE_PERPLEXITY } from "../agent-tools/perplexity2";
+import { AGENT_TOOLS_DIRECTIVE_PERPLEXITY } from "../agent-tools/perplexity2/perplexity2";
 import { AGENT_TOOLS_HELPER_getAgentDatabaseAll } from "../agent-tools/database-tool/database-tool_core";
 import { AGENT_TOOLS_DIRECTIVE_DATABASE } from "../agent-tools/database-tool/database-tool";
 import { AGENT_TOOLS_DIRECTIVE_VIDEO } from "../agent-tools/video-gen/runway-video-tool";

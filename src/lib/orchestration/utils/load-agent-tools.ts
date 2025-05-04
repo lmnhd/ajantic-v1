@@ -19,7 +19,7 @@ import { ORCH_LEGACY_UTILS_convertToFoundationalProps } from "./legacy_utilities
 
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { TextChatLogProps } from "../../text-chat-log";
-import { AGENT_TOOLS_perplexity2 } from "../../agent-tools/perplexity2";
+import { AGENT_TOOLS_perplexity2 } from "../../agent-tools/perplexity2/perplexity2";
 import { AGENT_TOOLS_urlScrape } from "../../agent-tools/url-scrape/url-scrape";
 import { AGENT_TOOLS_contextSets } from "../../agent-tools/context-sets/context-sets";
 import {

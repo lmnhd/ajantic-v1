@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Runtime Scraping Helpers
+
+This rule describes the pattern for reusable helper functions intended to be called by the *generated* custom tool code at runtime.
+
+- **Purpose:** For complex or common scraping tasks (like using Firecrawl or Puppeteer/Visual LLMs), dedicated helper functions should be created. These abstract away the complexity from the generated tool implementation.
+- **Location:** These helpers are typically located in shared utility directories, such as `src/lib/agent-tools/helpers/`.
+- **Usage:** The core generation logic in ([src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts](mdc:ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts)) is instructed (via the prompt and potentially `additionalContext` or `modificationRequests`) to import and use these helpers within the generated tool's `implementation` code when appropriate (e.g., `const { executeFirecrawlScrape } = await import('@/src/lib/agent-tools/helpers/web-scraping');`).
+- **Distinction:** These helpers are distinct from the *analysis* functions used by the `analyze-scraping` API. Runtime helpers perform the actual scraping, while analysis functions determine *how* to scrape.
+

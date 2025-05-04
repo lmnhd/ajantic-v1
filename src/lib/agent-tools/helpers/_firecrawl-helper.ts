@@ -1,3 +1,4 @@
+"use server";
 import FirecrawlApp, { CrawlScrapeOptions } from '@mendable/firecrawl-js'; // Or use @mendable/firecrawl-node
 import { FirecrawlCheckResult } from '../../../app/api/playground/analyze-scraping/_types'; // Import type from local types file
 import { logger } from '@/src/lib/logger'; // Import logger
