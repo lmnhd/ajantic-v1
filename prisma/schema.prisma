@@ -271,15 +271,17 @@ model CustomTool {
 }
 
 model UserCredential {
-  id             String   @id @default(cuid())
-  userId         Int
-  credentialName String
-  encryptedValue String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               Int      @id @default(autoincrement())
+  clerkId          String
+  credentialName   String
+  encryptedValue   String
+  serviceName      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [clerkId], references: [clerkId], onDelete: Cascade)
 
-  @@unique([userId, credentialName])
-  @@index([userId])
+  @@unique([clerkId, credentialName])
 }
+
+

@@ -46,7 +46,7 @@ export interface OrchestrationConfig {
  */
 export interface OrchestrationState {
   config: OrchestrationConfig;
-  status: "initializing" | "running" | "paused" | "awaiting_user" | "completed" | "cancelled" | "error";
+  status: "initializing" | "running" | "paused" | "awaiting_user" | "completed" | "cancelled" | "error" | "awaiting_credential";
   currentRound: number;
   currentCycleStep: number; // Step within the current round's cycle
   currentAgent: AgentComponentProps | null; // Agent currently processing
@@ -83,46 +83,26 @@ export interface AgentTurnInput {
  * Analogous to parts of `AgentUserResponse`.
  */
 export interface AgentTurnResult {
-  response: string; // The agent's textual response
+  status: AgentTurnStatus; // Use the updated status type
+  message?: string; // Optional main message/response content
+  response?: string; // Often used for the primary text output
   agentName: string;
-  
-  // === Context Modification (primarily used by manager agents) ===
-  contextModified?: boolean; // Flag indicating if context was modified
-  allContextSets?: ContextContainerProps[]; // Complete collection of context sets after updates
-  contextSet?: { teamName: string; sets: ContextContainerProps[] }; // Formatted for direct UI display
-  
-  // For backwards compatibility only - these should be deprecated
-  updatedContextSets?: ContextContainerProps[]; // Legacy support
-  editedContextSets?: any[]; // Legacy support
-  
-  // Error information
-  error?: string; // If the agent's turn failed
-  
-  // === Workflow Control (primarily used by manager agents) ===
-  agentDirectives?: {
-    messageTo: string;
-    message: string;
-    workflowComplete: boolean;
-    contextUpdates: boolean;
-    isInfoRequest: boolean;
-    contextSetUpdate?: {
-      contextSets: Array<{
-        name: string;
-        context: string;
-        visibleToAgents?: "none" | "all" | string | string[];
-      }>;
-    };
-    expectedOutput?: {
-      criteria: string;
-      format?: string;
-      requiredElements?: string[];
-      validationStrategy?: "exact" | "semantic" | "contains" | "custom" | "simple";
-    };
-  };
-
-  /** Optional status from worker response validation */
-  validationStatus?: z.infer<typeof ValidationSchema>;
+  error?: string; // Optional error message string
+  contextModified?: boolean; // Optional flag
+  agentDirectives?: any; // Keep existing fields
+  validationResult?: any; // Keep existing fields (consider unifying with validationResult)
+  validationStatus?: any; // Keep existing fields (consider unifying with validationResult)
+  allContextSets?: any; // Keep existing fields
+  credentialName?: string; // <-- Add optional credential name field
 }
+
+// Define the possible statuses
+export type AgentTurnStatus =
+  | 'COMPLETED'
+  | 'ERROR'
+  | 'COMPLETED_AND_VALIDATED'
+  | 'VALIDATION_FAILED'
+  | 'REQUIRES_CREDENTIAL_INPUT'; // <-- Add this status
 
 // Add this near other schemas or helpers
 export const ValidationSchema = z.object({

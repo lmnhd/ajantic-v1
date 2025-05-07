@@ -8,7 +8,7 @@ import {
   ModelProviderEnum,
 } from "@/src/lib/types";
 import { AGENT_TOOLS_word } from "./word-tools";
-import { AGENT_TOOLS_agentGlobalState } from "@/src/app/api/pinecone/agent_global_state";
+import { AGENT_TOOLS_agentGlobalState } from "@/src/lib/agent-tools/agent-global-state/agent_global_state";
 import { AGENT_TOOLS_video } from "./video-gen/runway-video-tool";
 
 import {
@@ -33,7 +33,22 @@ import { AGENT_TOOLS_database } from "./database-tool/database-tool";
 import { AGENT_TOOLS_knowledgeBase } from "./knowledgebase-tool/kb-tool";
 import { AGENT_TOOLS_documentProcessor } from "./documents-tools/document-processor";
 import { AGENT_TOOLS_perplexity2 } from "./perplexity2/perplexity2";
-export const LOAD_AGENT_TOOLS = (
+import { getDecryptedCredential } from '@/src/lib/security/credentials';
+
+// Define custom error for missing credentials
+export class MissingCredentialError extends Error {
+  public readonly credentialName: string;
+
+  constructor(credentialName: string) {
+    super(`Required credential "${credentialName}" is missing for the current user.`);
+    this.name = 'MissingCredentialError';
+    this.credentialName = credentialName;
+    // Ensure the prototype chain is correct
+    Object.setPrototypeOf(this, MissingCredentialError.prototype);
+  }
+}
+
+export const LOAD_AGENT_TOOLS = async (
   toolNames: AI_Agent_Tools[] | string[],
   loadedTools: any = {},
   sets: ContextContainerProps[],
@@ -181,7 +196,7 @@ export const LOAD_AGENT_TOOLS = (
       case AI_Agent_Tools.AUTO_GEN_TOOL:
         loadedTools = {
           ...loadedTools,
-          ...AGENT_TOOLS_autoGenTool(agentName, userID, textChatLogs || []),
+          ...AGENT_TOOLS_autoGenTool(userID, textChatLogs || []),
         };
         break;
       case AI_Agent_Tools.DATABASE:
@@ -212,6 +227,7 @@ export const LOAD_AGENT_TOOLS = (
         break;
     }
   });
+
   return loadedTools;
 };
 

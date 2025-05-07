@@ -77,7 +77,7 @@ import {
   MEMORY_retrieve,
   MEMORY_store,
 } from "@/src/lib/agent-memory/store-retrieve";
-import { AGENT_TOOLS_urlScrape } from "@/src/lib/agent-tools/agent-url-scrape";
+
 import {
   UTILS_convertLineSetsToContext,
   UTILS_loadAgentGlobalPrompt,
@@ -947,7 +947,7 @@ export const PLAYGROUND_MIGRATE_GP_TO_TABLE_GLOBAL_STATE_SAVE = async (
       await APP_FROZEN_store(state.meta3, state.meta2, {
         localState: globalState.localState,
         currentConversation: globalState.currentConversation,
-        contextSet: globalState.localState.contextSet,
+        
       });
       console.log(`Successfully stored frozen state for ${state.meta3}`);
     } catch (error) {

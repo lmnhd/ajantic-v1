@@ -36,7 +36,7 @@ import {
 import { DynamicFormSchema } from "@/src/lib/post-message-analysis/form-creator-core";
 import { anthropic } from "@ai-sdk/anthropic";
 import { ToolRegistry } from "../agent-tools/tool-registry/registry";
-import { createCustomToolReference } from "../agent-tools/tool-registry/custom-tool-ref";
+import { createCustomToolReference, getCustomToolId, isCustomToolReference } from "../agent-tools/tool-registry/custom-tool-ref";
 
 import { 
   toolRequestSchema, 
@@ -57,7 +57,7 @@ export const TEAM_autogen_create_workflow = async (
     modificationStore
   }: AutoGenWorkflowProps,
   userId: string
-) => {
+): Promise<AutoGenWorkflowProps> => {
   console.log("!!!TEAM_autogen_create_workflow!!!", {
     processToAutomate,
     readyMadeAgents,
@@ -308,6 +308,35 @@ export const TEAM_autogen_create_workflow = async (
         agentNames: team.agents.map(a => a.name)
       });
       
+      let requiredCredentialsSet = new Set<string>();
+      if (team.agents && team.agents.length > 0) {
+        for (const agent of team.agents) {
+          if (agent.tools && agent.tools.length > 0) {
+            for (const toolRef of agent.tools) {
+              if (typeof toolRef === 'string' && isCustomToolReference(toolRef)) {
+                try {
+                  const toolId = getCustomToolId(toolRef);
+                  const toolDefinition = await ToolRegistry.getToolById(toolId);
+                  if (toolDefinition?.requiredCredentialNames && Array.isArray(toolDefinition.requiredCredentialNames) && toolDefinition.requiredCredentialNames.length > 0) {
+                    toolDefinition.requiredCredentialNames.forEach(name => {
+                      if (name && typeof name === 'string') {
+                        requiredCredentialsSet.add(name);
+                      }
+                    });
+                  }
+                } catch (toolError) {
+                  logger.error(`Error fetching tool definition during credential check: ${toolRef}`, { toolError });
+                }
+              }
+            }
+          }
+        }
+      }
+      const requiredCredentialsArray = Array.from(requiredCredentialsSet);
+      if (requiredCredentialsArray.length > 0) {
+        logger.info("Identified required credentials for auto-generated team", { requiredCredentialsArray });
+      }
+      
       return {
         processToAutomate,
         readyMadeAgents,
@@ -316,6 +345,7 @@ export const TEAM_autogen_create_workflow = async (
         orchestrationType: team.orchestrationType,
         resultTeam: team,
         resultContext: team.contextSets ?? [],
+        requiredCredentials: requiredCredentialsArray,
       } as AutoGenWorkflowProps;
     }
 

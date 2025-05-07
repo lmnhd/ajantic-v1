@@ -717,18 +717,30 @@ export interface LoadFromServerReturn {
   contextSet: ContextSet;
 }
 
-export type AgentUserResponse = {
-  response: ChainValues | string;
+// Define the possible statuses
+export type AgentResponseStatus =
+  | 'COMPLETED'
+  | 'ERROR'
+  | 'REQUIRES_CREDENTIAL_INPUT';
+
+// Update the main response type
+export interface AgentUserResponse {
+  status: AgentResponseStatus; // <-- Add this required field
+  response: string; // Keep existing required fields
   history: ServerMessage[];
   context: ContextContainerProps[];
-  agentProps: AgentFoundationalPromptProps;
-  postMessageProps?: PostMessageAnalysisProps;
-  nextAction?: string;
-  prompt?: string;
-  _data?: any;
-  textChatLogs?: TextChatLogProps[];
-  streamData?: any;
-};
+  agentProps: AgentFoundationalPromptProps | null;
+  nextAction: string;
+  prompt: string;
+  textChatLogs: TextChatLogProps[];
+  // Add optional fields used in error/credential returns
+  message?: string;
+  credentialName?: string;
+  error?: string;
+  // Keep any other existing fields
+  postMessageProps?: any;
+  contextModified?: boolean;
+}
 
 export type KB_LiveQueryResult = {
   groupId?: string;

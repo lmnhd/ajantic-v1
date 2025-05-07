@@ -53,6 +53,7 @@ export type AutoGenWorkflowProps = {
   modificationStore?: {
     modifications: string[];
   }[];
+  requiredCredentials?: string[];
 };
 
 // Zod schema previously defined inline in autogen.ts

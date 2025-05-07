@@ -22,6 +22,7 @@ export interface ToolDetails extends ToolListItem {
         examples?: { input: Record<string, any>; output: any }[];
         [key: string]: any; // Allow other metadata
     };
+    requiredCredentialNames?: Array<{ name: string; label: string }>;
 }
 
 // Response from the tool execution endpoint

@@ -1,0 +1,81 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Prisma Database Guide for Local Development (Ajantic V1)
+
+This guide outlines the recommended workflow for managing your database schema during local development and provides context on past migration issues.
+
+## 1. Preferred Workflow: `prisma db push` (Fast & Simple)
+
+For local development on this project, the preferred method for applying schema changes is `npx prisma db push`.
+
+**Why use `db push`?**
+
+*   **Fast & Simple:** Directly updates your database to match `prisma/schema.prisma`.
+*   **Avoids Migration Errors:** Skips the migration engine and shadow database, bypassing the connection issues previously encountered.
+*   **Preserves Data:** Your existing data in `ajantic_dev` is kept safe (unless you force a reset).
+*   **No Migration History Needed (Locally):** Ideal for rapid iteration when you don't need rollback capabilities.
+
+**How to use it:**
+
+1.  Modify your `prisma/schema.prisma` file.
+2.  Run the command:
+    ```powershell
+    npx prisma db push
+    ```
+3.  Prisma will show you the planned changes and ask for confirmation (unless you use `--accept-data-loss`, which is generally not recommended).
+4.  After confirmation, Prisma applies the changes directly to `ajantic_dev`.
+5.  Run `npx prisma generate` if needed to update the Prisma Client.
+
+**Best Practices for `db push`:**
+
+*   **Backup Regularly:** While `db push` aims to preserve data, it's always wise to back up your database before significant schema changes.
+*   **Avoid `--force-reset` / `--accept-data-loss`:** Only use these if you are absolutely sure you want to potentially delete data.
+*   **Production Note:** For deploying changes to production, you **must** use the migration workflow (`prisma migrate deploy`) to ensure safety, consistency, and auditability. If you need to switch to migrations later, you might need to create an initial migration based on your current schema.
+
+## 2. Context: Past Migration Issues (`prisma migrate dev`)
+
+Previously, attempts to use `prisma migrate dev` encountered persistent issues, primarily:
+
+*   **Shadow Database Connection Errors (`P1001`):** The migration engine failed to connect to the temporary shadow database required for generating migrations, even when `SHADOW_DATABASE_URL` was set. This seems common in some Windows/PostgreSQL environments.
+*   **SQL File Encoding Errors (BOM):** When manually generating SQL scripts using PowerShell's default redirection (`>`), Byte Order Marks (BOM) were sometimes included, causing `psql` to fail when applying the script. (The fix is using `Set-Content -Encoding utf8` or saving files explicitly as UTF-8 without BOM).
+
+## 3. Contingency: Manual Migration Steps (If Migrations Are Ever Needed)
+
+If you ever need to generate and apply a migration manually (e.g., to prepare for production) and `prisma migrate dev` still fails, the following workaround (based on Plan H) was successful:
+
+1.  **Ensure Schema:** Verify `prisma/schema.prisma` is correct.
+2.  **Generate Diff SQL:** Create the SQL script without involving the shadow database or BOM issues. Replace `yourpassword` with your actual password.
+    ```powershell
+    # Use Set-Content to avoid BOM issues
+    npx prisma migrate diff --from-url "postgresql://postgres:yourpassword@localhost:5432/ajantic_dev" --to-schema-datamodel prisma/schema.prisma --script | Set-Content -Encoding utf8 your_migration_name.sql
+    ```
+3.  **Create Migration Folder:** Manually create the folder in `prisma/migrations`.
+    ```powershell
+    $timestamp = Get-Date -Format "yyyyMMddHHmmss"
+    $migrationName = "your_migration_name" # Use a descriptive name
+    $migrationFolderPath = "prisma\migrations\$timestamp" + "_$migrationName"
+    New-Item -ItemType Directory -Path $migrationFolderPath
+    Move-Item -Path .\your_migration_name.sql -Destination "$migrationFolderPath\migration.sql"
+    ```
+4.  **Manually Apply SQL:** Use `psql` or a GUI tool to run the `migration.sql` file against `ajantic_dev`.
+    ```powershell
+    psql -h localhost -p 5432 -U postgres -d ajantic_dev -f "$migrationFolderPath\migration.sql"
+    ```
+5.  **Mark as Applied:** Tell Prisma the migration is done.
+    ```powershell
+    npx prisma migrate resolve --applied "$timestamp"_"$migrationName"
+    ```
+6.  **Generate Client:**
+    ```powershell
+    npx prisma generate
+    ```
+
+**This manual process should only be used if `prisma migrate dev` fails and you explicitly need a migration file.** For regular local development, stick to `prisma db push`.
+
+---
+
+
+I hope this revised guide is clearer and more accurately reflects your development needs! Let me know if you'd like any further adjustments.

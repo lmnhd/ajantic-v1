@@ -71,6 +71,7 @@ import { handleOrchestratedChatSubmit } from "../workflow/functions/message-hand
 import { APP_FROZEN_getById } from "@/src/lib/app-frozen";
 import { TEAM_autogen_create_workflow } from "@/src/lib/autogen/autogen";
 import { AutoGenWorkflowProps } from "../autogen/autogen-types";
+import { AgentTurnInput } from "../orchestration/types"; // Adjust path if needed
 
 // Helper function to calculate agent disabled states based on orchestration settings
 const updateAgentDisabledStates = (
@@ -224,6 +225,17 @@ export interface AnalysisState {
   toggleAgentVisibility: (agentName: string, index: number, allAgentNames: string[], soloInstead?: boolean) => void;
   shiftContextContainer: (index: number, direction: "up" | "down") => void;
   clearContextText: (index: number) => void;
+
+  // --- ADD STATE FOR CREDENTIAL MODAL ---
+  isCredentialPromptRequired: boolean;
+  missingCredentialName: string | null;
+  retryTurnPayload: AgentTurnInput | null; // Or a more specific type for retry data
+  // --- END ADD STATE ---
+
+  // --- ADD ACTIONS FOR CREDENTIAL MODAL ---
+  requireCredentialInput: (payload: { credentialName: string; retryPayload: AgentTurnInput | null }) => void;
+  resolveCredentialInput: () => void;
+  // --- END ADD ACTIONS ---
 }
 
 export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisState => ({
@@ -515,6 +527,7 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
       set,
       _validCustomAgentSet
     );
+    console.warn("Need to modify the imported handleOrchestratedChatSubmit function to check for credential requirements.");
   },
   handleClearMessages: () => handleClearMessages(get, set),
 
@@ -851,6 +864,36 @@ export const useAnalysisStore = create<AnalysisState>()((set, get): AnalysisStat
       };
     });
   },
+
+  // --- ADD STATE FOR CREDENTIAL MODAL ---
+  isCredentialPromptRequired: false,
+  missingCredentialName: null,
+  retryTurnPayload: null,
+  // --- END ADD STATE ---
+
+  // --- ADD ACTIONS FOR CREDENTIAL MODAL IMPLEMENTATION ---
+  requireCredentialInput: (payload) => {
+    console.log("ACTION: requireCredentialInput called with:", payload.credentialName);
+    set({
+      isCredentialPromptRequired: true,
+      missingCredentialName: payload.credentialName,
+      retryTurnPayload: payload.retryPayload // Store the payload needed for retry
+    });
+    // Optional: Add a small delay before potentially saving state if needed
+    // setTimeout(() => get().saveState(), 500);
+  },
+
+  resolveCredentialInput: () => {
+    console.log("ACTION: resolveCredentialInput called");
+    set({
+      isCredentialPromptRequired: false,
+      missingCredentialName: null,
+      retryTurnPayload: null // Clear the retry payload
+    });
+     // Optional: Add a small delay before potentially saving state if needed
+    // setTimeout(() => get().saveState(), 500);
+  },
+  // --- END ADD ACTIONS ---
 }));
 
 // If in browser context, expose the store globally for direct access

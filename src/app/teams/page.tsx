@@ -51,6 +51,7 @@ import { AIMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { ClientMessage } from "@/src/lib/aicontext";
 import { OrchestrationType2 } from "@/src/lib/orchestration/types";
+import { CredentialInputModal } from "@/components/global/credential-input-modal";
 
 export default function TeamsPage() {
   const { updateNavbar, resetNavbar } = useNavbarStore();
@@ -113,7 +114,11 @@ export default function TeamsPage() {
     setOrchestrationMode,
     customAgentSet,
     setCustomAgentSet,
-    isInitialized
+    isInitialized,
+    isCredentialPromptRequired,
+    missingCredentialName,
+    retryTurnPayload,
+    resolveCredentialInput
   }: AnalysisState = useAnalysisStore();
 
   const { messages: logMessages, clear: clearLogMessages } = useLogger();
@@ -301,6 +306,35 @@ export default function TeamsPage() {
     console.log("New order: ", newOrder);
 
     setCustomAgentSet(newOrder);
+  };
+
+  const handleCredentialSubmitted = () => {
+    const credentialJustProvided = missingCredentialName; // Capture before clearing
+
+    resolveCredentialInput(); // Close modal, clear flags and retryPayload in store
+
+    if (credentialJustProvided) {
+      const resumeMessage = `The credential '${credentialJustProvided}' has now been provided. Please continue.`;
+      // Pre-populate the main chat input with this message
+      agentGlobalChatInputChanged(resumeMessage);
+      // The user will then press "send" on AgentChat2, which will trigger
+      // handleOrchestratedChatSubmit or handleAgentChatSubmit with this new message.
+      toast({
+        title: "Credential Ready",
+        description: "The credential has been set. Please send the pre-filled message to continue.",
+      });
+    }
+  };
+
+  const handleModalClose = () => {
+    // If the user closes the modal without submitting
+    resolveCredentialInput();
+    toast({
+        title: "Credential Input Cancelled",
+        description: "The operation requiring the credential may not proceed.",
+        variant: "default"
+    });
+    // Orchestration has already stopped. User needs to take new action.
   };
 
   return (
@@ -652,6 +686,13 @@ export default function TeamsPage() {
           </div>
         </div>
       </div>
+      <CredentialInputModal
+        isOpen={isCredentialPromptRequired}
+        credentialName={missingCredentialName || "Unknown Credential"}
+        onClose={handleModalClose}
+        onSaveSuccess={handleCredentialSubmitted}
+       
+      />
     </div>
   );
 }

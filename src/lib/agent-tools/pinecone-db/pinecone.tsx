@@ -5,7 +5,7 @@ import {
   PINECONE_deleteIndex,
   PINECONE_deleteVectorsById,
 } from "@/src/app/api/pinecone";
-import { AGENT_GLOBAL_STATE_save } from "@/src/app/api/pinecone/agent_global_state";
+import { AGENT_GLOBAL_STATE_save } from "@/src/lib/agent-tools/agent-global-state/agent_global_state";
 import { TOOLFUNCTION_split_text } from "@/src/app/api/tools/splitters";
 import { AGENT_TOOLS_EMULATOR, AISessionState } from "@/src/lib/types";
 import { tool } from "ai";

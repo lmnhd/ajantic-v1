@@ -20,12 +20,39 @@ import { z } from 'zod'; // Import z for schema definition in helper
 import { AnalysisResult } from '../../api/playground/analyze-scraping/_types';
 import { Separator } from '@/components/ui/separator'; // Import Separator for visual division
 import { ScrollArea } from '@/components/ui/scroll-area'; // Import ScrollArea for results
+import {
+    ConsultationRequest,
+    ConsultationResponse,
+    ConsultationHistory,
+    ConsultationRound,
+} from '@/src/app/api/playground/analyze-implementation-strategy/_types'; // Adjust path if needed
+// Import the specific schema used in the API route's type definition
+import { consultationRequestSchema, toolRequestSchema as apiToolRequestSchema } from '@/src/app/api/playground/analyze-implementation-strategy/_types';
+import { v4 as uuidv4 } from 'uuid'; // For unique IDs
+import QuickStartCard from '@/components/custom-tools/QuickStartCard';
+import ToolSelectionAndExecutionCard from '@/components/custom-tools/ToolSelectionAndExecutionCard';
+import ToolDefinitionCard from '@/components/custom-tools/ToolDefinitionCard';
+import RefineStructureCard from '@/components/custom-tools/RefineStructureCard';
+import { HelpersCard } from '@/components/custom-tools/HelpersCard';
+import ImplementationStrategyAnalysisCard from '@/components/custom-tools/ImplementationStrategyAnalysisCard';
 
 // --- Adapter Functions ---
 const adaptProviderToEnumCase = (provider: ModelProviderEnum): string => {
     return String(provider).toUpperCase();
 };
 // --- End Adapter Functions ---
+
+// Interface for a single credential requirement being defined in the UI
+export interface CredentialRequirementInput {
+  id: string; // A unique ID for list rendering (e.g., uuid)
+  name: string; // e.g., "OPENAI_API_KEY" - must be unique within the tool
+  label: string; // e.g., "OpenAI API Key"
+  currentSecretValue: string; // For the input field, cleared after save
+  isSecretSaved: boolean; // UI feedback: true if a value for this 'name' has been successfully saved via the API
+}
+
+// Add this component near the top of the file, after the imports
+
 
 export default function CustomToolPage() {
   // --- Access Zustand State ---
@@ -91,8 +118,23 @@ export default function CustomToolPage() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  // --- End State for Scraper Consultant ---
 
+  // --- NEW STATE for Implementation Consultant ---
+  const [consultationHistory, setConsultationHistory] = useState<ConsultationHistory>([]);
+  const [strategyModificationRequests, setStrategyModificationRequests] = useState<string[]>([]);
+  const [isAnalyzingStrategy, setIsAnalyzingStrategy] = useState<boolean>(false);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
+  const [latestConsultationRound, setLatestConsultationRound] = useState<ConsultationRound | null>(null);
+  const [isStrategyAccepted, setIsStrategyAccepted] = useState<boolean>(false); // Flag to proceed after analysis
+  // --- END NEW STATE ---
+
+  // In your component's state:
+  const [credentialRequirements, setCredentialRequirements] = useState<CredentialRequirementInput[]>([]);
+  const [showCredentialRequirementsSection, setShowCredentialRequirementsSection] = useState<boolean>(false); // New state
+
+  // When loading an existing tool for editing, you would populate this state
+  // based on toolDefinition.requiredCredentialNames and potentially by checking
+  // if those credentials already exist for the user (to set isSecretSaved).
 
   // Fetch the tool list on component mount
   useEffect(() => {
@@ -149,6 +191,13 @@ export default function CustomToolPage() {
         setExecError(null); // Clear execution errors too
         setResult(null);
         // Do not clear proposedToolRequest here, handleClearTool does that
+        setConsultationHistory([]); // Clear consultant state
+        setStrategyModificationRequests([]);
+        setLatestConsultationRound(null);
+        setStrategyError(null);
+        setIsStrategyAccepted(false);
+        setCredentialRequirements([]); // Clear credentials
+        setShowCredentialRequirementsSection(false); // Hide when no tool loaded
         return;
       }
 
@@ -224,6 +273,28 @@ export default function CustomToolPage() {
         }
         // --- End Setting State for Section 2 ---
 
+        // --- POPULATE CREDENTIAL REQUIREMENTS ---
+        if (data.requiredCredentialNames && Array.isArray(data.requiredCredentialNames)) {
+          const newCredentialInputs: CredentialRequirementInput[] = data.requiredCredentialNames.map(cred => ({
+            id: uuidv4(),
+            name: cred.name,
+            label: cred.label,
+            currentSecretValue: '', // Always clear on load
+            isSecretSaved: false // We'll implement checking this later if needed
+          }));
+          setCredentialRequirements(newCredentialInputs);
+        } else {
+          setCredentialRequirements([]);
+        }
+        // --- END POPULATE ---
+
+        if (data.requiredCredentialNames && data.requiredCredentialNames.length > 0) {
+          setShowCredentialRequirementsSection(true); // Show if tool has credentials
+        } else {
+          setCredentialRequirements([]);
+          setShowCredentialRequirementsSection(false); // Hide if tool has no credentials
+        }
+
       } catch (err) {
         console.error(`Error fetching details for tool ${toolId || toolRef}:`, err);
         setExecError(err instanceof Error ? err.message : `Failed to load details for ${toolRef}.`);
@@ -233,6 +304,8 @@ export default function CustomToolPage() {
         setGenName(''); setGenDescription(''); setGenPurpose(''); setGenInputs([]);
         setGenExpectedOutput(''); setGenCategory(''); setGenAdditionalContext('');
         setGenExamplesJson('[]'); setGenModifications([]); setGeneratedDefinition(null);
+        setCredentialRequirements([]); // Clear on error too
+        setShowCredentialRequirementsSection(false); // Hide on error
       } finally {
         setIsDetailsLoading(false);
       }
@@ -338,6 +411,24 @@ export default function CustomToolPage() {
   }, []);
   // --- ADD HANDLER FUNCTIONS FOR STRUCTURE MODIFICATIONS END ---
 
+  // --- NEW HANDLER FUNCTIONS FOR STRATEGY MODIFICATIONS START ---
+  const handleAddStrategyModification = useCallback(() => {
+    setStrategyModificationRequests(prev => [...prev, '']);
+  }, []);
+
+  const handleRemoveStrategyModification = useCallback((index: number) => {
+      setStrategyModificationRequests(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleStrategyModificationChange = useCallback((index: number, value: string) => {
+      setStrategyModificationRequests(prev => {
+          const newMods = [...prev];
+          newMods[index] = value;
+          return newMods;
+      });
+  }, []);
+  // --- NEW HANDLER FUNCTIONS FOR STRATEGY MODIFICATIONS END ---
+
   const handleExecute = async () => {
     if (!userId || !canExecute || !selectedToolDetails) return;
     setIsExecuting(true); setExecError(null); setResult(null);
@@ -405,6 +496,7 @@ export default function CustomToolPage() {
       category: z.string().optional(),
       additionalContext: z.string().optional(),
       examples: z.array(z.object({ input: z.record(z.any()), output: z.any() })).optional(),
+      requiredCredentialNames: z.array(z.object({ name: z.string().min(1), label: z.string().min(1) })).optional(), // <-- ADDED
   });
   type SavePayload = z.infer<typeof savePayloadSchema>;
 
@@ -422,11 +514,55 @@ export default function CustomToolPage() {
           setUpdateToolError(errorMsg);
           return null;
       }
+      // Validate credential requirements: ensure names and labels are filled if any are defined
+      if (credentialRequirements.some(req => (req.name && !req.label) || (!req.name && req.label) || (req.name && req.name.trim() === '') || (req.label && req.label.trim() === ''))) {
+        const errorMsg = "All defined credential requirements must have both a unique 'Name (as ENV VAR)' and a 'User-Friendly Label'.";
+        setCreateToolError(errorMsg);
+        setUpdateToolError(errorMsg);
+        return null;
+      }
+      const uniqueCredentialNames = new Set(credentialRequirements.filter(req => req.name.trim()).map(req => req.name.trim()));
+      if (uniqueCredentialNames.size !== credentialRequirements.filter(req => req.name.trim()).length) {
+        const errorMsg = "Credential 'Name (as ENV VAR)' must be unique for each requirement.";
+        setCreateToolError(errorMsg);
+        setUpdateToolError(errorMsg);
+        return null;
+      }
+
+
       let examplesData: any[] | undefined = undefined; try { const parsed = JSON.parse(genExamplesJson); if (Array.isArray(parsed)) examplesData = parsed; } catch { /* warn */ }
-      const payload: SavePayload = { name: genName, description: genDescription, inputs: genInputs, implementation: currentImplementation, purpose: genPurpose || genDescription, expectedOutput: genExpectedOutput, category: genCategory, additionalContext: genAdditionalContext, examples: examplesData };
-      const validationResult = savePayloadSchema.safeParse(payload); if (!validationResult.success) { /* ... set error ... */ return null; }
+      
+      const activeCredentialRequirements = credentialRequirements
+        .filter(req => req.name.trim() !== '' && req.label.trim() !== '')
+        .map(req => ({ name: req.name.trim(), label: req.label.trim() }));
+
+      const payload: SavePayload = {
+          name: genName,
+          description: genDescription,
+          inputs: genInputs,
+          implementation: currentImplementation,
+          purpose: genPurpose || genDescription,
+          expectedOutput: genExpectedOutput,
+          category: genCategory,
+          additionalContext: genAdditionalContext,
+          examples: examplesData,
+          requiredCredentialNames: activeCredentialRequirements.length > 0 ? activeCredentialRequirements : undefined, // <-- ADDED
+      };
+      const validationResult = savePayloadSchema.safeParse(payload);
+      if (!validationResult.success) {
+           const errorMsg = `Payload validation error: ${validationResult.error.flatten().fieldErrors}`;
+           setCreateToolError(errorMsg);
+           setUpdateToolError(errorMsg);
+           console.error("Save Payload Validation Error:", validationResult.error.flatten());
+           return null;
+      }
       return validationResult.data;
-  }, [generatedDefinition, genName, genDescription, genExpectedOutput, genInputs, genExamplesJson, genPurpose, genCategory, genAdditionalContext, setCreateToolError, setUpdateToolError]);
+  }, [
+    generatedDefinition, genName, genDescription, genExpectedOutput, genInputs,
+    genExamplesJson, genPurpose, genCategory, genAdditionalContext,
+    credentialRequirements, // New dependency
+    setCreateToolError, setUpdateToolError
+  ]);
 
   // --- REFACTORED: Save as New Tool ---
   const handleCreateTool = useCallback(async () => {
@@ -559,38 +695,142 @@ export default function CustomToolPage() {
       setIsGeneratingDef(false); setIsCreatingTool(false); setIsUpdatingTool(false);
       setIsQuickStarting(false); setIsRefining(false); setIsAnalyzing(false);
       setIsListLoading(false); setIsDetailsLoading(false); setIsExecuting(false);
-      console.log("Cleared tool state.");
+      console.log("Cleared tool state including consultant.");
+      // Clear Consultant State
+      setConsultationHistory([]); setStrategyModificationRequests([]);
+      setLatestConsultationRound(null); setStrategyError(null); setIsStrategyAccepted(false);
+      setCredentialRequirements([]); // Clear credentials
+      setShowCredentialRequirementsSection(false); // Hide on clear
   }, [/* Add any setters if needed by ESLint */]);
 
   // --- NEW: Handler to delete implementation ---
   const handleDeleteImplementation = useCallback(() => {
       setGeneratedDefinition(prev => {
         if (!prev) return null;
-        // Return the definition object, setting implementation to an empty string
-        // This satisfies the type requirement while indicating no code.
         return { ...prev, implementation: '' };
       });
-      // Optionally clear modification requests too?
-      // setGenModifications([]);
-      console.log("Deleted generated implementation.");
+      setIsStrategyAccepted(false); // Reset acceptance if implementation is deleted
+      console.log("Deleted generated implementation and reset strategy acceptance.");
   }, []);
 
-  // --- REFACTORED: Generate/Regenerate Implementation ---
+  // --- NEW HANDLER: Analyze Implementation Strategy ---
+  const handleAnalyzeStrategy = useCallback(async (isRefinement: boolean = false) => {
+      if (!userId) {
+          setStrategyError("User ID not found. Cannot analyze strategy.");
+          return;
+      }
+      // Basic validation for core definition fields needed for analysis
+      if (!genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)) {
+           setStrategyError("Tool Name, Description, Expected Output, and all Parameter details (Name, Type, Description) are required before analyzing strategy.");
+           return;
+      }
+
+      setIsAnalyzingStrategy(true);
+      setStrategyError(null);
+      setIsStrategyAccepted(false); // Reset acceptance on new analysis/refinement
+      // Clear definition error from previous attempts
+      setGenDefError(null);
+
+      // Construct the current tool request object from the form state
+      const currentToolRequestObject: ToolRequest = { // Use the base ToolRequest type here
+          name: genName,
+          description: genDescription,
+          purpose: genPurpose || genDescription,
+          inputs: genInputs,
+          expectedOutput: genExpectedOutput,
+          category: genCategory,
+          additionalContext: genAdditionalContext,
+          implementation: generatedDefinition?.implementation,
+          // Ensure optional fields are included if they exist in your base ToolRequest type
+          modificationRequests: genModifications, // Assuming genModifications holds these
+          // examples: parse from genExamplesJson if needed
+      };
+
+      // Validate the constructed object against the specific schema expected by the API
+      const validationResult = apiToolRequestSchema.safeParse(currentToolRequestObject);
+      if (!validationResult.success) {
+            setStrategyError(`Internal Error: Constructed tool request is invalid - ${validationResult.error.flatten().fieldErrors}`);
+            setIsAnalyzingStrategy(false);
+            return;
+      }
+      const validatedToolRequest = validationResult.data; // Use the validated data
+
+      const payload: ConsultationRequest = {
+          userId,
+          currentToolRequest: validatedToolRequest, // Use the validated object
+          consultationHistory: isRefinement ? consultationHistory : [],
+          newStrategyModifications: strategyModificationRequests,
+      };
+
+      try {
+          const response = await fetch('/api/playground/analyze-implementation-strategy', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          });
+
+          const data: ConsultationResponse | { error: string; details?: any } = await response.json();
+
+          if (!response.ok) {
+              const errorMsg = (data as { error: string }).error || `Strategy analysis request failed: ${response.status}`;
+              setStrategyError(errorMsg);
+              setLatestConsultationRound(null); // Clear previous results on error
+              // Optionally clear history if the request failed fundamentally?
+              // setConsultationHistory([]);
+          } else {
+              const result = data as ConsultationResponse;
+              setLatestConsultationRound(result.latestRound);
+              setConsultationHistory(result.updatedHistory);
+              setStrategyModificationRequests([]); // Clear input mods after successful round
+          }
+      } catch (err) {
+          console.error("Analyze Strategy API call failed:", err);
+          setStrategyError(err instanceof Error ? err.message : 'Strategy analysis API error.');
+          setLatestConsultationRound(null);
+      } finally {
+          setIsAnalyzingStrategy(false);
+      }
+
+  }, [
+      userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput,
+      genCategory, genAdditionalContext, generatedDefinition, // Include potentially used state
+      consultationHistory, strategyModificationRequests // Include state read in the handler
+      // Add setters if needed by linting
+  ]);
+  // --- END NEW HANDLER ---
+
+  // --- MODIFIED: Generate/Regenerate Implementation ---
   const handleGenerateImplementation = useCallback(async () => {
+    // 1. Check if analysis is needed (no implementation exists AND strategy not accepted yet)
+    const needsAnalysis = !generatedDefinition?.implementation && !isStrategyAccepted;
+
+    if (needsAnalysis) {
+        // Trigger analysis FIRST. The rest of this function should only run
+        // after the user accepts the strategy proposed by the analysis.
+        await handleAnalyzeStrategy(false); // Pass false for initial analysis
+        // Stop here. The user needs to interact with the analysis results and click "Accept".
+        return;
+    }
+
+    // 2. Proceed with generation only if strategy is accepted OR implementation already exists
+    // Basic validation (as before)
     if (!userId || !genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)) {
-         setGenDefError("Tool Name, Description, Expected Output, and all Parameter details (Name, Type, Description) are required.");
-         setIsGeneratingDef(false);
+         setGenDefError("Tool Name, Description, Expected Output, and all Parameter details are required.");
+         // Don't set loading false here if analysis was just triggered
+         // setIsGeneratingDef(false);
          return;
     }
+
+    // --- Original Generation Logic ---
     setIsGeneratingDef(true); setGenDefError(null);
-    // --- MODIFICATION: Set implementation to empty string when starting generation ---
+    // Clear implementation visually while generating
     setGeneratedDefinition(prev => {
-        if (!prev) return null; // If no previous definition, keep it null
-        // Otherwise, keep the structure but clear the implementation
-        return { ...prev, implementation: '' };
+        if (!prev) return null;
+        return { ...prev, implementation: '// Generating...' }; // Show placeholder
     });
-    // --- END MODIFICATION ---
     setCreateToolError(null); setCreateToolSuccess(null); setUpdateToolError(null); setUpdateToolSuccess(null);
+    setStrategyError(null); // Clear strategy error if we are now generating
+
     type GeneratePayload = {
         userId: string;
         name: string;
@@ -601,11 +841,11 @@ export default function CustomToolPage() {
         category: string;
         additionalContext: string;
         modificationRequests: string[];
-        implementation?: string;
+        implementation?: string; // <<< Added this missing field
         modelArgs: any;
         examples?: any[];
     };
-    const payload: GeneratePayload = {
+    const payload: GeneratePayload = { /* ... construct payload as before ... */
         userId,
           name: genName,
           description: genDescription,
@@ -615,25 +855,22 @@ export default function CustomToolPage() {
           category: genCategory,
           additionalContext: genAdditionalContext,
         modificationRequests: genModifications,
-        // Send the PREVIOUS implementation (if it existed) to the API for context
-        implementation: generatedDefinition?.implementation,
-        modelArgs: {
-            ...genModelArgs,
-            provider: String(genModelArgs.provider).toUpperCase()
-        }
+        implementation: generatedDefinition?.implementation === '// Generating...' ? undefined : generatedDefinition?.implementation, // Send previous implementation if exists
+        modelArgs: { /* ... construct modelArgs ... */ }
+        // examples: ... parse from genExamplesJson ...
     };
+
      try {
-        const parsedExamples = JSON.parse(genExamplesJson);
-        if (Array.isArray(parsedExamples)) {
-            payload.examples = parsedExamples;
-        }
-        const response = await fetch('/api/playground/generate-tool-definition', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        // ... parse examples ...
+        const response = await fetch('/api/playground/generate-tool-definition', { /* ... fetch options ... */ body: JSON.stringify(payload) });
         const data = await response.json();
         if (!response.ok) {
             setGenDefError(data.error || `Request failed: ${response.status}`);
-            // --- MODIFICATION: Restore previous definition if generation fails? Maybe not needed.
+            // Restore previous implementation if generation failed?
+             setGeneratedDefinition(prev => ({ ...(prev ?? {} as GeneratedToolDefinition), implementation: payload.implementation || '' }));
         } else {
-            setGeneratedDefinition(data.definition); // Set the new full definition
+            setGeneratedDefinition(data.definition);
+            // Update form fields based on refined definition from AI (optional but good)
             if (data.definition) {
                 setGenName(data.definition.name || genName);
                 const params = data.definition.parameters || data.definition.inputs;
@@ -641,8 +878,22 @@ export default function CustomToolPage() {
                 setGenExpectedOutput(data.definition.expectedOutput || genExpectedOutput);
             }
         }
-    } catch (err) { setGenDefError(err instanceof Error ? err.message : 'API error.'); } finally { setIsGeneratingDef(false); }
-  }, [userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput, genCategory, genAdditionalContext, genModifications, generatedDefinition, genModelArgs, genExamplesJson]);
+    } catch (err) {
+        setGenDefError(err instanceof Error ? err.message : 'API error.');
+         // Restore previous implementation on catch
+         setGeneratedDefinition(prev => ({ ...(prev ?? {} as GeneratedToolDefinition), implementation: payload.implementation || '' }));
+    } finally {
+        setIsGeneratingDef(false);
+    }
+  }, [
+      userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput,
+      genCategory, genAdditionalContext, genModifications, generatedDefinition,
+      genModelArgs, genExamplesJson,
+      isStrategyAccepted, // Include new dependency
+      handleAnalyzeStrategy // Include handler dependency
+      // Add setters if needed
+  ]);
+  // --- END MODIFIED ---
 
   // --- NEW: Scraper Consultant Handlers ---
   const handleAnalyzeWebsite = useCallback(async () => {
@@ -768,7 +1019,11 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
   const adaptedModelProp = { ...genModelArgs, provider: String(genModelArgs.provider).toUpperCase() as any };
   const displayModelProp = { ...genModelArgs };
   const hasImplementation = !!generatedDefinition?.implementation;
-  const isDefinitionFormValid = genName && genDescription && genExpectedOutput && !genInputs.some(p => !p.name || !p.type || !p.description);
+  const isDefinitionFormValid = 
+    genName.trim() !== '' && 
+    genDescription.trim() !== '' && 
+    genExpectedOutput.trim() !== '' && 
+    !genInputs.some(p => !p.name.trim() || !p.type.trim() || !p.description.trim());
   // Update canSaveOrUpdate logic to only require implementation and valid form fields
   const canSaveOrUpdate = hasImplementation && isDefinitionFormValid;
   // Rename the derived constant to avoid conflict with the state setter
@@ -778,6 +1033,186 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
       const value = formValues[param.name];
       return !(value === null || value === undefined || value === '');
   });
+
+  // --- NEW HANDLERS FOR CREDENTIAL REQUIREMENTS ---
+  const handleAddCredentialRequirement = useCallback(() => {
+    setCredentialRequirements(prev => [...prev, { id: uuidv4(), name: '', label: '', currentSecretValue: '', isSecretSaved: false }]);
+  }, []);
+
+  const handleRemoveCredentialRequirement = useCallback((id: string) => {
+    setCredentialRequirements(prev => prev.filter(req => req.id !== id));
+  }, []);
+
+  const handleCredentialRequirementChange = useCallback((id: string, field: keyof Omit<CredentialRequirementInput, 'id' | 'currentSecretValue' | 'isSecretSaved'>, value: string) => {
+    setCredentialRequirements(prev =>
+      prev.map(req =>
+        req.id === id ? { ...req, [field]: value } : req
+      )
+    );
+  }, []);
+  // --- END NEW HANDLERS ---
+
+  // --- NEW STATE for Implementation Consultant (within Helpers section) ---
+  const [activeHelperTab, setActiveHelperTab] = useState<'scraper' | 'implementation'>('scraper');
+  const [helperImpConName, setHelperImpConName] = useState<string>('');
+  const [helperImpConDescription, setHelperImpConDescription] = useState<string>('');
+  const [helperImpConPurpose, setHelperImpConPurpose] = useState<string>('');
+  const [helperImpConInputsStr, setHelperImpConInputsStr] = useState<string>(''); // Simplified input as string for now
+  const [helperImpConExpectedOutput, setHelperImpConExpectedOutput] = useState<string>('');
+  const [helperImpConConsultationHistory, setHelperImpConConsultationHistory] = useState<ConsultationHistory>([]);
+  const [helperImpConLatestRound, setHelperImpConLatestRound] = useState<ConsultationRound | null>(null);
+  const [isHelperAnalyzingStrategy, setIsHelperAnalyzingStrategy] = useState<boolean>(false);
+  const [helperImpConStrategyError, setHelperImpConStrategyError] = useState<string | null>(null);
+  const [helperImpConStrategyModifications, setHelperImpConStrategyModifications] = useState<string[]>([]);
+
+  // Define the function to render tab content
+  const renderHelperTabContent = (tab: 'scraper' | 'implementation'): React.ReactNode => {
+    if (tab === 'scraper') {
+      return (
+        <>
+          {/* JSX for Scraper Consultant (using consultantUrl, handleAnalyzeWebsite, etc.) */}
+          <div>
+            <Label htmlFor="consultant-url" className="text-sm font-medium text-slate-300">Target URL</Label>
+            <Input
+              id="consultant-url"
+              type="url"
+              value={consultantUrl}
+              onChange={(e) => setConsultantUrl(e.target.value)}
+              placeholder="https://example.com/data-page"
+              className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400"
+              disabled={isAnalyzing}
+            />
+          </div>
+          <div>
+            <Label htmlFor="consultant-data-desc" className="text-sm font-medium text-slate-300">Data to Extract (Description)</Label>
+            <Textarea
+              id="consultant-data-desc"
+              value={consultantDataDesc}
+              onChange={(e) => setConsultantDataDesc(e.target.value)}
+              placeholder="e.g., product names, prices, and availability status"
+              className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400 h-24"
+              disabled={isAnalyzing}
+            />
+          </div>
+          <Button
+            onClick={handleAnalyzeWebsite}
+            disabled={isAnalyzing || !consultantUrl}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            {isAnalyzing ? 'Analyzing Website...' : 'Analyze Website for Scraping'}
+          </Button>
+          {analysisError && (
+            <div className="text-red-400 text-xs p-2 border border-red-700 bg-red-900/30 rounded">
+              <p className="font-semibold">Analysis Error:</p>
+              <p>{analysisError}</p>
+            </div>
+          )}
+          {analysisResult && (
+            <Card className="mt-4 bg-slate-800/80 border-slate-700 shadow-md">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="text-sm font-semibold text-indigo-300">Scraping Analysis Report</CardTitle>
+              </CardHeader>
+              <CardContent className="text-xs text-slate-300 space-y-1.5">
+                <p><strong>Status:</strong> <span className={`font-medium ${analysisResult.status === 'success' ? 'text-green-400' : 'text-yellow-400'}`}>{analysisResult.status}</span></p>
+                <p><strong>Message:</strong> {analysisResult.message}</p>
+                <p><strong>Suggested Method:</strong> <span className="font-semibold text-purple-300">{analysisResult.suggestedMethod || 'N/A'}</span></p>
+                {analysisResult.potentialIssues && analysisResult.potentialIssues.length > 0 && (
+                  <div><strong>Potential Issues:</strong> <ul className="list-disc list-inside pl-3 text-slate-400">{analysisResult.potentialIssues.map((issue, i) => <li key={i}>{issue}</li>)}</ul></div>
+                )}
+                {analysisResult.suggestedSelectors && Object.keys(analysisResult.suggestedSelectors).length > 0 && (
+                  <div><strong>Suggested Selectors:</strong> <pre className="bg-slate-900/70 p-2 rounded text-xs overflow-x-auto mt-1 border border-slate-700">{JSON.stringify(analysisResult.suggestedSelectors, null, 2)}</pre></div>
+                )}
+                <Separator className="my-2 bg-slate-600"/>
+                <p className='text-indigo-400 text-xs font-semibold'>Preliminary Check:</p>
+                <p>Accessible: {analysisResult.preliminaryCheck?.accessible ? <span className='text-green-400'>Yes</span> : <span className='text-red-400'>No</span>}</p>
+                <p>Status Code: {analysisResult.preliminaryCheck?.statusCode || 'N/A'}</p>
+                <p>Likely Block Page: {analysisResult.preliminaryCheck?.isLikelyBlockPage ? <span className='text-yellow-400'>Yes ({analysisResult.preliminaryCheck?.blockReason || 'Unknown'})</span> : 'No'}</p>
+                {analysisResult.firecrawlCheck?.attempted && (
+                  <>
+                    <Separator className='my-2 bg-slate-600'/>
+                    <p className='text-indigo-400 text-xs font-semibold'>Firecrawl Check (if attempted):</p>
+                    <p>Success: {analysisResult.firecrawlCheck?.success ? <span className='text-green-400'>Yes</span> : <span className='text-red-400'>No</span>}</p>
+                    {analysisResult.firecrawlCheck?.error && <p>Error: <span className='text-red-400'>{analysisResult.firecrawlCheck.error}</span></p>}
+                  </>
+                )}
+              </CardContent>
+              <CardFooter className="pt-3 pb-3">
+                <Button onClick={handlePopulateFromAnalysis} variant="outline" size="sm" className="text-indigo-300 border-indigo-600/70 hover:bg-indigo-700/20 hover:text-indigo-200 hover:border-indigo-500 text-xs">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="M12 22h6a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v10"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M4 12a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h1v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0-1-1H4z"/></svg>
+                  Populate Main Form from Analysis
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
+        </>
+      );
+    }
+    if (tab === 'implementation') {
+      return (
+        <>
+          {/* Start of Implementation Consultant UI for Helper Section */}
+          <div>
+            <Label htmlFor="helper-impcon-name" className="text-sm font-medium text-slate-300">Tool Name</Label>
+            <Input id="helper-impcon-name" value={helperImpConName} onChange={(e) => setHelperImpConName(e.target.value)} placeholder="e.g., getWeatherForecast" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400" disabled={isHelperAnalyzingStrategy} />
+          </div>
+          <div>
+            <Label htmlFor="helper-impcon-desc" className="text-sm font-medium text-slate-300">Tool Description</Label>
+            <Textarea id="helper-impcon-desc" value={helperImpConDescription} onChange={(e) => setHelperImpConDescription(e.target.value)} placeholder="Describes what the tool does" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400 h-20" disabled={isHelperAnalyzingStrategy}/>
+          </div>
+          <div>
+            <Label htmlFor="helper-impcon-purpose" className="text-sm font-medium text-slate-300">Tool Purpose (Optional)</Label>
+            <Input id="helper-impcon-purpose" value={helperImpConPurpose} onChange={(e) => setHelperImpConPurpose(e.target.value)} placeholder="Specific goal or use case" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400" disabled={isHelperAnalyzingStrategy} />
+          </div>
+          <div>
+            <Label htmlFor="helper-impcon-inputs" className="text-sm font-medium text-slate-300">Inputs (one per line: name:type:description)</Label>
+            <Textarea id="helper-impcon-inputs" value={helperImpConInputsStr} onChange={(e) => setHelperImpConInputsStr(e.target.value)} placeholder="location:string:City and state, e.g. San Francisco, CA\nunit:string(opt):Temperature unit (celsius or fahrenheit)" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400 h-24 font-mono text-xs" disabled={isHelperAnalyzingStrategy}/>
+          </div>
+          <div>
+            <Label htmlFor="helper-impcon-output" className="text-sm font-medium text-slate-300">Expected Output Description</Label>
+            <Input id="helper-impcon-output" value={helperImpConExpectedOutput} onChange={(e) => setHelperImpConExpectedOutput(e.target.value)} placeholder="e.g., JSON with temperature, conditions" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400" disabled={isHelperAnalyzingStrategy}/>
+          </div>
+
+          <Button 
+            onClick={() => handleAnalyzeStrategy(false)} 
+            disabled={isHelperAnalyzingStrategy || !helperImpConName || !helperImpConDescription || !helperImpConExpectedOutput}
+            className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+          >
+            {isHelperAnalyzingStrategy && !helperImpConLatestRound ? 'Analyzing Strategy...' : 'Analyze Implementation Strategy'}
+          </Button>
+
+          {/* Display general error from the helper analysis call, if not shown by the card */}
+          {helperImpConStrategyError && !helperImpConLatestRound && (
+            <div className="text-red-400 text-xs p-2 border border-red-700 bg-red-900/30 rounded">
+                <p className="font-semibold">Strategy Analysis Error:</p>
+                <p>{helperImpConStrategyError}</p>
+            </div>
+          )}
+
+          {/* Reusable card for displaying analysis and refinement options for the HELPER */}
+          {helperImpConLatestRound && (
+            <ImplementationStrategyAnalysisCard
+                consultationRound={helperImpConLatestRound}
+                strategyError={helperImpConStrategyError} // Pass the specific error for the helper context
+                isAnalyzing={isHelperAnalyzingStrategy}
+                modificationRequests={helperImpConStrategyModifications}
+                onModificationChange={handleModificationChange}
+                onAddModification={handleAddModification}
+                onRemoveModification={handleRemoveModification}
+                onRefineStrategy={() => handleAnalyzeStrategy(true)} // true for refinement
+                onAcceptOrPopulate={handleAcceptStructure}
+                acceptButtonText="Use This Configuration in Main Form"
+                refineButtonText="Refine Helper Strategy"
+                title="Helper: Strategy Analysis"
+                description="Review and refine the strategy for this helper tool definition."
+                cardClassName="bg-slate-800/70 border-slate-700" // Slightly different styling for helper card
+            />
+          )}
+          {/* End of Implementation Consultant UI for Helper Section */}
+        </>
+      );
+    }
+    return null;
+  };
 
   return (
     <div className="p-4 font-sans flex flex-col gap-8 max-w-full mx-auto bg-slate-800 min-h-screen text-slate-200">
@@ -789,680 +1224,147 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
         <div className="lg:col-span-8 space-y-8">
           {/* Section 0a: Quick Start - Conditionally Visible */}
           {!toolRef && !proposedToolRequest && (
-              <Card className="bg-slate-700 shadow-xl border-slate-600 border overflow-hidden">
-                  <CardHeader className="bg-gradient-to-r from-slate-700 to-indigo-900">
-                      <CardTitle className="text-indigo-300">Quick Start: Define a Tool Concept</CardTitle>
-                      <CardDescription className="text-slate-300">Provide basic details, and the AI will generate a starting structure (name, description, parameters, output) for the tool definition below.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-4">
-                      <div className="grid w-full items-center gap-1.5">
-                          <Label htmlFor="quickStartName">Tool Name Idea</Label>
-                          <Input id="quickStartName" value={quickStartName} onChange={(e) => setQuickStartName(e.target.value)} placeholder="e.g., PDF Text Extractor" disabled={isQuickStarting} />
-                      </div>
-                      <div className="grid w-full items-center gap-1.5">
-                          <Label htmlFor="quickStartDesc">Brief Description</Label>
-                          <Input id="quickStartDesc" value={quickStartDesc} onChange={(e) => setQuickStartDesc(e.target.value)} placeholder="e.g., Extracts all text content from a PDF file" disabled={isQuickStarting} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                          <div className="grid w-full items-center gap-1.5">
-                              <Label htmlFor="quickStartInputs">Suggest Inputs (one per line)</Label>
-                              <Textarea id="quickStartInputs" value={quickStartInputs} onChange={(e) => setQuickStartInputs(e.target.value)} placeholder="e.g., pdfFilePath\npageNumber (optional)" rows={3} disabled={isQuickStarting} />
-                          </div>
-                          <div className="grid w-full items-center gap-1.5">
-                              <Label htmlFor="quickStartOutputs">Suggest Outputs (one per line)</Label>
-                              <Textarea id="quickStartOutputs" value={quickStartOutputs} onChange={(e) => setQuickStartOutputs(e.target.value)} placeholder="e.g., extractedText (string)\nerrorIfExists (boolean)" rows={3} disabled={isQuickStarting} />
-                          </div>
-                      </div>
-                  </CardContent>
-                  <CardFooter className="flex flex-col items-start gap-2">
-                      <Button onClick={handleQuickStart} disabled={isQuickStarting || !quickStartName || !quickStartDesc || !quickStartInputs || !quickStartOutputs}>
-                          {isQuickStarting ? 'Generating Structure...' : 'Generate Tool Structure'}
-                      </Button>
-                      {quickStartError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full"><strong className="font-semibold">Quick Start Error:</strong><pre className="mt-1 text-sm">{quickStartError}</pre></div>}
-                  </CardFooter>
-              </Card>
+            <QuickStartCard
+              quickStartName={quickStartName}
+              onQuickStartNameChange={setQuickStartName}
+              quickStartDesc={quickStartDesc}
+              onQuickStartDescChange={setQuickStartDesc}
+              quickStartInputs={quickStartInputs}
+              onQuickStartInputsChange={setQuickStartInputs}
+              quickStartOutputs={quickStartOutputs}
+              onQuickStartOutputsChange={setQuickStartOutputs}
+              isQuickStarting={isQuickStarting}
+              onQuickStart={handleQuickStart}
+              quickStartError={quickStartError}
+            />
           )}
 
-           {/* Section 0b: Scraper Consultant - Conditionally Visible */}
-           {!toolRef && !proposedToolRequest && (
-            <div className="lg:hidden">
-                <Card className="bg-slate-700 shadow-xl border-slate-600 border overflow-hidden">
-                    <CardHeader className="bg-gradient-to-r from-slate-700 to-purple-900 pb-3">
-                        <CardTitle className="text-purple-300 text-lg flex items-center">
-                            <span className="mr-2">🧰</span> Helpers
-                        </CardTitle>
-                        <CardDescription className="text-gray-200">Tools to assist with custom tool creation</CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                        <div className="border-b border-slate-600">
-                            <div className="flex">
-                                <button 
-                                    className="px-4 py-2 text-sm font-medium text-purple-300 border-b-2 border-purple-500 focus:outline-none"
-                                    aria-current="page"
-                                >
-                                    Scraper Consultant
-                                </button>
-                                <button 
-                                    className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200 hover:border-gray-400 border-b-2 border-transparent"
-                                    disabled
-                                >
-                                    More Soon...
-                                </button>
-                            </div>
-                        </div>
-                        <div className="p-4 space-y-4">
-                            <Button variant="outline" className="w-full bg-slate-800 text-gray-200 border-purple-700">
-                                Use Helper Tools →
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-           )}
-
           {/* Section 1: Tool Selection & Execution - Always Visible */}
-          <Card className="bg-slate-700 shadow-xl border-slate-600 border overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-slate-700 to-blue-900">
-                  <CardTitle className="text-blue-300">{selectedToolDetails ? `Execute: ${selectedToolDetails.name}` : 'Load / Execute Tool'}</CardTitle>
-                  <CardDescription className="text-slate-300">{selectedToolDetails ? 'Provide arguments and execute the selected tool.' : 'Select a tool from the list to load its details and enable execution.'}</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-5 p-6 bg-slate-800">
-                  {/* Tool Selection Dropdown */}
-                  <div className="grid w-full items-center gap-2">
-                      <Label htmlFor="toolSelect" className="text-slate-300 font-medium">Select Tool</Label>
-                      <Select onValueChange={handleToolSelect} value={toolRef || "placeholder"} disabled={!userId || isListLoading || isExecuting || isGeneratingDef || isCreatingTool || isUpdatingTool}>
-                          <SelectTrigger id="toolSelect" className="w-full bg-slate-700 border-slate-600 text-slate-200 focus:border-blue-500">
-                              <SelectValue placeholder={
-                                  !userId ? "Waiting for User ID..." :
-                                  (isListLoading ? "Loading tools..." : "Select a tool...")
-                              } />
-                          </SelectTrigger>
-                          <SelectContent className="bg-slate-800 border-slate-600 text-slate-200">
-                              <SelectItem value="placeholder" disabled>
-                                  {!userId ? "Waiting..." : (isListLoading ? "Loading..." : "Select...")}
-                              </SelectItem>
-                              {userId && !isListLoading && toolList.length === 0 && <SelectItem value="no-tools" disabled>No custom tools found</SelectItem>}
-                              {userId && !isListLoading && toolList.map((tool) => (
-                                  <SelectItem key={tool.id} value={tool.reference}>
-                                      {tool.name} <span className="text-xs text-slate-400 ml-2">({tool.reference})</span>
-                                  </SelectItem>
-                              ))}
-                          </SelectContent>
-                      </Select>
-                      {toolListError && <p className="text-sm text-red-400 mt-1">{toolListError}</p>}
-                  </div>
-
-                  {/* Arguments Area */}
-                  {isDetailsLoading && <p className="text-sm text-blue-400">Loading arguments...</p>}
-                  {!isDetailsLoading && !selectedToolDetails && <p className="text-sm text-slate-400 italic">Select a tool above to view arguments.</p>}
-                  {selectedToolDetails && !isDetailsLoading && (
-                      <div className="border border-slate-600 bg-slate-700 p-5 rounded-lg flex flex-col gap-4">
-                          <h3 className="text-md font-semibold text-blue-300">Arguments for Execution</h3>
-                          {selectedToolDetails.parameters.length === 0 && <p className="text-sm text-slate-400">No arguments required.</p>}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {selectedToolDetails.parameters.map((param) => (
-                                  <div key={param.name} className="bg-slate-800 p-3 rounded-md border border-slate-600 shadow-sm">
-                                      <Label htmlFor={param.name} className="text-sm font-medium text-slate-300 mb-1 block">
-                                          {param.description || param.name}
-                                          {param.required !== false && <span className="text-red-400 ml-1">*</span>}
-                                      </Label>
-                                      {param.type === 'string' && <Input type="text" id={param.name} name={param.name} value={formValues[param.name] || ''} onChange={(e) => handleFormChange(param.name, e.target.value, param.type)} placeholder={param.description || param.name} disabled={isExecuting} className="bg-slate-700 border-slate-600 text-slate-200 focus:border-blue-500" />}
-                                      {param.type === 'number' && <Input type="number" id={param.name} name={param.name} value={formValues[param.name] || ''} onChange={(e) => handleFormChange(param.name, e.target.value, param.type)} placeholder={param.description || param.name} disabled={isExecuting} className="bg-slate-700 border-slate-600 text-slate-200 focus:border-blue-500" />}
-                                      {param.type === 'boolean' && 
-                                          <div className="flex items-center space-x-2 mt-2">
-                                              <Checkbox id={param.name} name={param.name} checked={!!formValues[param.name]} onCheckedChange={(checked) => handleCheckboxChange(param.name, checked)} disabled={isExecuting} className="text-blue-600 border-blue-800 data-[state=checked]:bg-blue-700" />
-                                              <Label htmlFor={param.name} className="text-sm text-slate-300">Enable</Label>
-                                          </div>
-                                      }
-                                      {param.type !== 'string' && param.type !== 'number' && param.type !== 'boolean' && <p className="text-xs text-orange-400 mt-1">Unsupported Input Type: {param.type}</p>}
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-                  )}
-              </CardContent>
-              <CardFooter className="flex flex-col items-start gap-4 p-6 bg-gradient-to-r from-slate-800 to-slate-700">
-                  {/* Execute Button */}
-                  <div className="flex flex-wrap gap-3">
-                      <Button
-                          onClick={handleExecute}
-                          disabled={!selectedToolDetails || !isExecutionReady || isExecuting || isDetailsLoading || isGeneratingDef || isCreatingTool || isUpdatingTool}
-                          className="bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                          {isExecuting ? 'Executing...' : 'Execute Tool'}
-                      </Button>
-
-                      {/* Clear Button - Always available */}
-                      <Button variant="outline" size="default" onClick={handleClearTool} className="border-slate-500 text-slate-300 hover:bg-slate-700">
-                          Clear All / Start Over
-                      </Button>
-                  </div>
-                  {selectedToolDetails && !isExecutionReady && <p className="text-xs text-orange-400">Fill required arguments (*).</p>}
-
-                  {/* Execution Results/Errors */}
-                  {execError && 
-                      <div className="text-red-400 border border-red-900 bg-red-900/25 p-3 rounded-lg whitespace-pre-wrap w-full">
-                          <strong className="font-semibold">Error:</strong>
-                          <pre className="mt-1 text-sm">{execError}</pre>
-                      </div>
-                  }
-                  {result && 
-                      <div className="border border-blue-800 bg-slate-800 p-3 rounded-lg w-full">
-                          <strong className="font-semibold text-blue-300">Result:</strong>
-                          <pre className="mt-1 text-sm whitespace-pre-wrap break-all text-slate-300 bg-slate-900 p-3 rounded border border-slate-700 font-mono">{result}</pre>
-                      </div>
-                  }
-              </CardFooter>
-            </Card>
+          <ToolSelectionAndExecutionCard
+            userId={userId}
+            toolRef={toolRef}
+            onToolSelect={handleToolSelect}
+            toolList={toolList}
+            isListLoading={isListLoading}
+            toolListError={toolListError}
+            selectedToolDetails={selectedToolDetails}
+            isDetailsLoading={isDetailsLoading}
+            formValues={formValues}
+            onFormChange={handleFormChange}
+            onCheckboxChange={handleCheckboxChange}
+            isExecuting={isExecuting}
+            onExecute={handleExecute}
+            isExecutionReady={isExecutionReady || false}
+            execError={execError}
+            result={result}
+            onClearTool={handleClearTool}
+            isDisabled={isGeneratingDef || isCreatingTool || isUpdatingTool || isQuickStarting || isRefining || isAnalyzing || isAnalyzingStrategy}
+          />
 
           {/* Section 2: Tool Definition & Implementation - Always Visible */}
-          <Card className="bg-slate-700 shadow-xl border-slate-600 border overflow-hidden">
-            <CardHeader className="bg-gradient-to-r from-slate-700 to-purple-900">
-                <CardTitle className="text-purple-300">{selectedToolDetails ? `Tool Implementation: ${genName || '(Loading...)'}` : 'Tool Implementation'}</CardTitle>
-                <CardDescription className="text-slate-300">
-                    {selectedToolDetails ? 'Modify the definition or implementation below. Use "Generate..." to update the code, then "Save Updates..." to persist.' : 'Define the structure, generate the implementation, and use "Save as New Tool". Select a tool above to load it for editing.'}
-                </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5 p-6 bg-slate-800">
-                {/* All form fields (genName, genDescription, genInputs, etc.) remain here */}
-                {/* ... Name, Description, Purpose ... */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="grid w-full items-center gap-1.5">
-                        <Label htmlFor="toolName" className="text-slate-300 font-medium">Tool Name <span className="text-red-400">*</span></Label>
-                        <Input 
-                            id="toolName" 
-                            value={genName} 
-                            onChange={(e) => setGenName(e.target.value)} 
-                            placeholder="e.g., CLICKBANK_MARKETPLACE_ANALYZER" 
-                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                            className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400"
-                        />
-                    </div>
-                    <div className="grid w-full items-center gap-1.5">
-                        <Label htmlFor="toolPurpose" className="text-slate-300 font-medium">Tool Purpose (Optional)</Label>
-                        <Input 
-                            id="toolPurpose" 
-                            value={genPurpose} 
-                            onChange={(e) => setGenPurpose(e.target.value)} 
-                            placeholder="Defaults to description if empty" 
-                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                            className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400"
-                        />
-                    </div>
-                </div>
-                <div className="grid w-full items-center gap-1.5">
-                    <Label htmlFor="toolDescription" className="text-slate-300 font-medium">Description <span className="text-red-400">*</span></Label>
-                    <Textarea 
-                        id="toolDescription" 
-                        value={genDescription} 
-                        onChange={(e) => setGenDescription(e.target.value)} 
-                        placeholder="Describe what the tool does..." 
-                        rows={3} 
-                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                        className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400"
-                    />
-                </div>
-
-                {/* Model Selection */}
-                <div className="border border-slate-600 p-3 rounded-md space-y-3 bg-slate-700">
-                    <Label className="font-semibold text-slate-300">LLM Configuration (for generation)</Label>
-                 <ModelProviderSelect
-                    model={displayModelProp}
-                    modelProviderChanged={handleModelProviderChange}
-                    modelNameChanged={handleModelNameChange}
-                    temperatureChanged={handleTemperatureChange}
-                    index={0}
-                    localState={localState}
-                 />
-             </div>
-
-              {/* Modification Requests - Only visible when implementation exists */}
-              {generatedDefinition?.implementation && (
-                <div className="border border-slate-600 p-4 rounded-lg space-y-3 bg-gradient-to-r from-slate-700 to-slate-800">
-                    <div className="flex justify-between items-center">
-                        <Label className="font-semibold text-teal-300">Modification Requests (Optional)</Label>
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={handleAddModification} 
-                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                            className="text-xs border-teal-800 bg-slate-800 text-teal-300 hover:bg-slate-700"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M12 5v14M5 12h14"></path></svg>
-                            Add Request
-                        </Button>
-                    </div>
-                    <p className="text-xs text-teal-400/70">Provide instructions to the LLM on how to generate or modify the implementation code.</p>
-                    
-                    <div className="space-y-2">
-                 {genModifications.map((mod, index) => (
-                            <div key={index} className="flex items-center gap-2 bg-slate-700 p-2 rounded-md border border-slate-600 shadow-sm">
-                         <Input
-                            type="text"
-                            value={mod}
-                            onChange={(e) => handleModificationChange(index, e.target.value)}
-                            placeholder={`e.g., Add error handling for network requests`}
-                                    className="flex-grow text-sm bg-slate-800 border-slate-600 text-slate-200"
-                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                         />
-                                <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    onClick={() => handleRemoveModification(index)} 
-                                    disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                    className="h-8 w-8 p-0 text-teal-400 hover:text-red-400 hover:bg-slate-900/50"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
-                                    <span className="sr-only">Remove</span>
-                                </Button>
-                     </div>
-                 ))}
-                        
-                        {genModifications.length === 0 && (
-                            <div className="flex flex-col items-center justify-center p-4 bg-slate-800/50 rounded-md border border-dashed border-teal-800">
-                                <p className="text-teal-300 text-sm mb-2">No modification requests yet</p>
-                                <p className="text-xs text-center text-teal-400/70 mb-2">Add requests to guide how the AI should implement or improve the code</p>
-                                <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    onClick={handleAddModification} 
-                                    disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                    className="text-xs border-teal-800 bg-slate-800 text-teal-300 hover:bg-slate-700"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M12 5v14M5 12h14"></path></svg>
-                                    Add First Request
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-              )}
-
-                {/* Input Parameters Section */}
-                <div className="border border-slate-600 p-5 rounded-lg space-y-4 bg-gradient-to-r from-slate-700 to-slate-800">
-                    <div className="flex justify-between items-center">
-                        <Label className="font-semibold text-amber-300">Input Parameters <span className="text-red-400">*</span></Label>
-                        <Button variant="outline" size="sm" onClick={handleAddParameter} disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} className="text-xs border-amber-800 bg-slate-800 text-amber-300 hover:bg-slate-700">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M12 5v14M5 12h14"></path></svg>
-                            Add Parameter
-                        </Button>
-                    </div>
-                    
-                    {/* Parameters content */}
-                    {genInputs.map((param, index) => (
-                        <div key={index} className="flex flex-col space-y-2 bg-slate-700 p-3 rounded-md border border-slate-600 shadow-sm">
-                            <div className="flex justify-between items-center">
-                                <h4 className="text-sm font-medium text-amber-300">Parameter #{index + 1}</h4>
-                                <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    onClick={() => handleRemoveParameter(index)} 
-                                    disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                    className="h-8 w-8 p-0 text-amber-400 hover:text-red-400 hover:bg-slate-900/50"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
-                                    <span className="sr-only">Remove</span>
-                                </Button>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="grid w-full items-center gap-1.5">
-                                    <Label htmlFor={`param-name-${index}`} className="text-xs text-slate-300">Name <span className="text-red-400">*</span></Label>
-                                    <Input 
-                                        id={`param-name-${index}`} 
-                                        value={param.name} 
-                                        onChange={(e) => handleParameterChange(index, 'name', e.target.value)} 
-                                        placeholder="e.g., apiKey"
-                                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                        className="bg-slate-800 border-slate-600 text-slate-200 text-sm"
-                                    />
-                                </div>
-                                <div className="grid w-full items-center gap-1.5">
-                                    <Label htmlFor={`param-type-${index}`} className="text-xs text-slate-300">Type <span className="text-red-400">*</span></Label>
-                                    <Select 
-                                        value={param.type} 
-                                        onValueChange={(value) => handleParameterChange(index, 'type', value)}
-                                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                    >
-                                        <SelectTrigger id={`param-type-${index}`} className="bg-slate-800 border-slate-600 text-slate-200 text-sm">
-                                            <SelectValue placeholder="Select type" />
-                                        </SelectTrigger>
-                                        <SelectContent className="bg-slate-800 border-slate-600 text-slate-200">
-                                            <SelectItem value="string">String</SelectItem>
-                                            <SelectItem value="number">Number</SelectItem>
-                                            <SelectItem value="boolean">Boolean</SelectItem>
-                                            <SelectItem value="array">Array</SelectItem>
-                                            <SelectItem value="object">Object</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                            <div className="grid w-full items-center gap-1.5">
-                                <Label htmlFor={`param-desc-${index}`} className="text-xs text-slate-300">Description <span className="text-red-400">*</span></Label>
-                                <Input 
-                                    id={`param-desc-${index}`} 
-                                    value={param.description} 
-                                    onChange={(e) => handleParameterChange(index, 'description', e.target.value)} 
-                                    placeholder="Describe this parameter..."
-                                    disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                    className="bg-slate-800 border-slate-600 text-slate-200 text-sm"
-                                />
-                            </div>
-                            <div className="flex items-center space-x-6 mt-1">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox 
-                                        id={`param-required-${index}`} 
-                                        checked={param.required !== false} 
-                                        onCheckedChange={(checked) => handleParameterChange(index, 'required', !!checked)}
-                                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                        className="text-amber-600 border-amber-800 data-[state=checked]:bg-amber-700"
-                                    />
-                                    <Label htmlFor={`param-required-${index}`} className="text-xs text-slate-300">Required</Label>
-                                </div>
-                                <div className="grid w-full items-center gap-1 grow">
-                                    <Label htmlFor={`param-default-${index}`} className="text-xs text-slate-300">Default Value (Optional)</Label>
-                                    <Input 
-                                        id={`param-default-${index}`} 
-                                        value={param.default !== undefined ? String(param.default) : ''}
-                                        onChange={(e) => {
-                                            let value: any = e.target.value;
-                                            if (param.type === 'number' && value) { value = Number(value); }
-                                            if (param.type === 'boolean') { value = value.toLowerCase() === 'true'; }
-                                            handleParameterChange(index, 'default', value);
-                                        }}
-                                        placeholder="Default value"
-                                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                        className="bg-slate-800 border-slate-600 text-slate-200 text-sm"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                    
-                    {/* Empty state when no parameters */}
-                    {genInputs.length === 0 && (
-                        <div className="flex flex-col items-center justify-center p-6 bg-slate-800/50 rounded-md border border-dashed border-amber-800 my-3">
-                            <p className="text-amber-300 text-sm mb-2">No parameters defined yet</p>
-                            <p className="text-xs text-center text-amber-400/70 mb-3">Define the inputs your tool will accept</p>
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={handleAddParameter} 
-                                disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                                className="text-xs border-amber-800 bg-slate-800 text-amber-300 hover:bg-slate-700"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M12 5v14M5 12h14"></path></svg>
-                                Add First Parameter
-                            </Button>
-                        </div>
-                    )}
-                    
-                    {/* Expected Output and other fields */}
-                </div>
-
-                {/* Expected Output */}
-                <div className="grid w-full items-center gap-1.5">
-                    <Label htmlFor="expectedOutput" className="text-slate-300 font-medium">Expected Output <span className="text-red-400">*</span></Label>
-                    <Textarea 
-                        id="expectedOutput" 
-                        value={genExpectedOutput} 
-                        onChange={(e) => setGenExpectedOutput(e.target.value)} 
-                        placeholder="Describe the expected output format or data..." 
-                        rows={3} 
-                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                        className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400"
-                    />
-                </div>
-
-                {/* Optional Fields */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="grid w-full items-center gap-1.5">
-                        <Label htmlFor="category" className="text-slate-300 font-medium">Category (Optional)</Label>
-                        <Input 
-                            id="category" 
-                            value={genCategory} 
-                            onChange={(e) => setGenCategory(e.target.value)} 
-                            placeholder="e.g., Web Scraping, Data Analysis" 
-                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                            className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400"
-                        />
-                    </div>
-                    <div className="grid w-full items-center gap-1.5">
-                        <Label htmlFor="additionalContext" className="text-slate-300 font-medium">Additional Context (Optional)</Label>
-                        <Textarea 
-                            id="additionalContext" 
-                            value={genAdditionalContext} 
-                            onChange={(e) => setGenAdditionalContext(e.target.value)} 
-                            placeholder="Any other notes for the LLM during generation..." 
-                            rows={3} 
-                            disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                            className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400"
-                        />
-                    </div>
-                </div>
-                <div className="grid w-full items-center gap-1.5">
-                    <Label htmlFor="examplesJson" className="text-slate-300 font-medium">Examples (Optional JSON Array)</Label>
-                    <Textarea 
-                        id="examplesJson" 
-                        value={genExamplesJson} 
-                        onChange={(e) => setGenExamplesJson(e.target.value)} 
-                        placeholder={`[ { "input": {"arg1": "value1"}, "output": "result1" } ]`} 
-                        rows={4} 
-                        disabled={isGeneratingDef || isCreatingTool || isUpdatingTool} 
-                        className="bg-slate-700 border-slate-600 text-slate-200 focus:border-indigo-500 placeholder:text-slate-400 font-mono text-sm"
-                    />
-                    <p className="text-xs text-slate-400">Provide input/output examples as a JSON array.</p>
-                </div>
-            </CardContent>
-            <CardFooter className="flex flex-col items-start gap-3 p-6 bg-gradient-to-r from-slate-800 to-slate-700">
-                {/* Button layout/logic remains the same */}
-                <div className="flex flex-wrap gap-3">
-                    {/* Generate Button */}
-                    <Button 
-                        onClick={handleGenerateImplementation} 
-                        disabled={!isDefinitionFormValid || isGeneratingDef || isCreatingTool || isUpdatingTool}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                    >
-                        {isGeneratingDef ? 'Generating...' : (hasImplementation ? 'Regenerate Implementation' : 'Generate Implementation')}
-                    </Button>
-                    {/* Save New Button */}
-                    <Button 
-                        variant="secondary" 
-                        onClick={handleCreateTool} 
-                        disabled={!canSaveOrUpdate || isGeneratingDef || isCreatingTool || isUpdatingTool}
-                        className="bg-teal-800 hover:bg-teal-900 text-teal-200 border-none"
-                    >
-                        {isCreatingTool ? 'Saving...' : 'Save as New Tool'}
-                    </Button>
-                    {/* Save Updates Button - Disabled if no tool selected */}
-                    <Button 
-                        variant="outline" 
-                        onClick={handleUpdateTool} 
-                        disabled={!selectedToolDetails || !canSaveOrUpdate || isGeneratingDef || isCreatingTool || isUpdatingTool}
-                        className="border-indigo-700 text-indigo-300 hover:bg-slate-700"
-                    >
-                        {isUpdatingTool ? 'Saving...' : 'Save Updates to Selected Tool'}
-                    </Button>
-                </div>
-
-                {/* Status messages remain the same */}
-                {genDefError && <div className="text-red-400 border border-red-900 bg-red-900/25 p-3 rounded-lg whitespace-pre-wrap w-full"><strong className="font-semibold">Generation Error:</strong><pre className="mt-1 text-sm">{genDefError}</pre></div>}
-                {createToolError && <div className="text-red-400 border border-red-900 bg-red-900/25 p-3 rounded-lg whitespace-pre-wrap w-full"><strong className="font-semibold">Create Error:</strong><pre className="mt-1 text-sm">{createToolError}</pre></div>}
-                {createToolSuccess && <div className="text-green-400 border border-green-900 bg-green-900/25 p-3 rounded-lg w-full"><strong className="font-semibold">Success:</strong> {createToolSuccess}</div>}
-                {updateToolError && <div className="text-red-400 border border-red-900 bg-red-900/25 p-3 rounded-lg whitespace-pre-wrap w-full"><strong className="font-semibold">Update Error:</strong><pre className="mt-1 text-sm">{updateToolError}</pre></div>}
-                {updateToolSuccess && <div className="text-green-400 border border-green-900 bg-green-900/25 p-3 rounded-lg w-full"><strong className="font-semibold">Success:</strong> {updateToolSuccess}</div>}
-
-                {/* Implementation Display */}
-                {generatedDefinition?.implementation && ( // Only show the box if implementation exists
-                    <div className="border border-indigo-800 p-4 bg-gradient-to-r from-slate-800 to-indigo-900/50 rounded-lg w-full mt-4 shadow-md">
-                        <div className="flex justify-between items-center mb-3">
-                            <h4 className="text-sm font-semibold text-indigo-300">Generated Implementation Code:</h4>
-                            {/* --- ADD DELETE BUTTON --- */}
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-red-400 border-red-700 bg-slate-800/80 hover:bg-red-900/30"
-                                onClick={handleDeleteImplementation}
-                                disabled={isGeneratingDef || isCreatingTool || isUpdatingTool}
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                                Delete Implementation
-                            </Button>
-                            {/* --- END DELETE BUTTON --- */}
-                        </div>
-                        <div className="bg-slate-900 border border-slate-700 rounded-md shadow-inner">
-                            <pre className="text-xs text-slate-300 whitespace-pre-wrap break-all overflow-x-auto p-4 max-h-[400px] overflow-y-auto font-mono">{generatedDefinition.implementation}</pre>
-                        </div>
-                    </div>
-                )}
-                {/* --- ADJUST MESSAGES --- */}
-                {!hasImplementation && isDefinitionFormValid && <p className="text-sm text-indigo-400 italic mt-2">Define the structure above, then click "Generate Implementation" to create the function body.</p>}
-                {!isDefinitionFormValid && <p className="text-sm text-amber-400 italic mt-2">Fill required definition fields (*) before generating/saving.</p>}
-                {/* --- END ADJUST MESSAGES --- */}
-            </CardFooter>
-          </Card>
+          <ToolDefinitionCard
+            selectedToolDetails={selectedToolDetails}
+            genName={genName} onGenNameChange={setGenName}
+            genPurpose={genPurpose} onGenPurposeChange={setGenPurpose}
+            genDescription={genDescription} onGenDescriptionChange={setGenDescription}
+            genModelArgs={genModelArgs}
+            onModelProviderChange={handleModelProviderChange}
+            onModelNameChange={handleModelNameChange}
+            onTemperatureChange={handleTemperatureChange}
+            localState={localState}
+            genModifications={genModifications}
+            onAddModification={handleAddModification}
+            onRemoveModification={handleRemoveModification}
+            onModificationChange={handleModificationChange}
+            genInputs={genInputs}
+            onAddParameter={handleAddParameter}
+            onRemoveParameter={handleRemoveParameter}
+            onParameterChange={handleParameterChange}
+            credentialRequirements={credentialRequirements}
+            onAddCredentialRequirement={handleAddCredentialRequirement}
+            onRemoveCredentialRequirement={handleRemoveCredentialRequirement}
+            onCredentialRequirementChange={handleCredentialRequirementChange}
+            showCredentialRequirementsSection={showCredentialRequirementsSection}
+            onToggleCredentialRequirements={setShowCredentialRequirementsSection}
+            toolRef={toolRef}
+            generatedDefinition={generatedDefinition}
+            genExpectedOutput={genExpectedOutput} onGenExpectedOutputChange={setGenExpectedOutput}
+            genCategory={genCategory} onGenCategoryChange={setGenCategory}
+            genAdditionalContext={genAdditionalContext} onGenAdditionalContextChange={setGenAdditionalContext}
+            genExamplesJson={genExamplesJson} onGenExamplesJsonChange={setGenExamplesJson}
+            isGeneratingDef={isGeneratingDef}
+            isCreatingTool={isCreatingTool}
+            isUpdatingTool={isUpdatingTool}
+            isDefinitionFormValid={Boolean(isDefinitionFormValid)}
+            canSaveOrUpdate={Boolean(canSaveOrUpdate)}
+            hasImplementation={hasImplementation}
+            onGenerateImplementation={handleGenerateImplementation}
+            onCreateTool={handleCreateTool}
+            onUpdateTool={handleUpdateTool}
+            onDeleteImplementation={handleDeleteImplementation}
+            genDefError={genDefError}
+            createToolError={createToolError}
+            updateToolError={updateToolError}
+            createToolSuccess={createToolSuccess}
+            updateToolSuccess={updateToolSuccess}
+          />
 
           {/* Section 3: Refine Tool Structure - Conditionally Visible */}
           {proposedToolRequest && (
-              <Card className="border-blue-300 border-2">
-                  <CardHeader>
-                      <CardTitle className="text-blue-700">Refine Proposed Tool Structure</CardTitle>
-                      <CardDescription>Review the structure generated by Quick Start. Add modification requests and click "Refine Structure" or "Accept Structure".</CardDescription>
-                  </CardHeader>
-                   <CardContent className="flex flex-col gap-4">
-                       {/* Display Proposed Structure */}
-                       <div className="border p-3 rounded bg-blue-50 space-y-2">
-                           <h4 className="font-semibold text-sm text-blue-800">Proposed Structure:</h4>
-                           <p className="text-xs"><strong className="font-medium">Name:</strong> {proposedToolRequest.name}</p>
-                           <p className="text-xs"><strong className="font-medium">Desc:</strong> {proposedToolRequest.description}</p>
-                           <p className="text-xs"><strong className="font-medium">Purpose:</strong> {proposedToolRequest.purpose || '(Same as description)'}</p>
-                           <p className="text-xs"><strong className="font-medium">Output:</strong> {proposedToolRequest.expectedOutput}</p>
-                           <div>
-                               <p className="text-xs font-medium mb-1">Inputs:</p>
-                               <ul className="list-disc list-inside pl-4 text-xs">
-                                   {Array.isArray(proposedToolRequest.inputs) && proposedToolRequest.inputs.map((inp, i) => (
-                                       <li key={i}>{inp.name} ({inp.type}) - {inp.description} {inp.required ? '(Required)' : '(Optional)'}</li>
-                                   ))}
-                                    {!Array.isArray(proposedToolRequest.inputs) && <li>(No inputs defined)</li>}
-                               </ul>
-                           </div>
-                       </div>
-
-                       {/* Modification Requests for Structure */}
-                       <div className="border p-3 rounded-md space-y-3">
-                           <Label className="font-semibold">Refinement Requests (Optional)</Label>
-                           <p className="text-xs text-gray-500">Instruct the AI how to change the structure above (e.g., rename a parameter, make an input optional).</p>
-                           {structureModifications.map((mod, index) => (
-                               <div key={index} className="flex items-center gap-2">
-                                   <Input
-                                      type="text"
-                                      value={mod}
-                                      onChange={(e) => handleStructureModificationChange(index, e.target.value)}
-                                      placeholder={`e.g., Change 'pdfFilePath' to 'file_url'`}
-                                      className="flex-grow"
-                                      disabled={isRefining}
-                                   />
-                                   <Button variant="ghost" size="sm" onClick={() => handleRemoveStructureModification(index)} disabled={isRefining}>X</Button>
-                               </div>
-                           ))}
-                           <Button variant="outline" size="sm" onClick={handleAddStructureModification} disabled={isRefining}>+ Add Refinement Request</Button>
-                       </div>
-                   </CardContent>
-                  <CardFooter className="flex flex-wrap gap-3 items-start">
-                      <Button onClick={handleRefineStructure} disabled={isRefining}>
-                          {isRefining ? 'Refining...' : 'Refine Structure'}
-                      </Button>
-                      <Button variant="secondary" onClick={handleAcceptStructure} disabled={isRefining}>
-                          Accept Structure & Populate Definition
-                      </Button>
-                      {refineError && <div className="text-red-600 border border-red-500 p-3 rounded whitespace-pre-wrap w-full basis-full"><strong className="font-semibold">Refine Error:</strong><pre className="mt-1 text-sm">{refineError}</pre></div>}
-                  </CardFooter>
-              </Card>
+              <RefineStructureCard
+                proposedToolRequest={proposedToolRequest}
+                structureModifications={structureModifications}
+                onAddStructureModification={handleAddStructureModification}
+                onRemoveStructureModification={handleRemoveStructureModification}
+                onStructureModificationChange={handleStructureModificationChange}
+                isRefining={isRefining}
+                onRefineStructure={handleRefineStructure}
+                onAcceptStructure={handleAcceptStructure}
+                refineError={refineError}
+              />
           )}
 
+          {/* Implementation Consultant UI */}
+          {latestConsultationRound && !isStrategyAccepted && (
+            <ImplementationStrategyAnalysisCard
+              consultationRound={latestConsultationRound}
+              strategyError={strategyError}
+              isAnalyzing={isAnalyzingStrategy}
+              modificationRequests={strategyModificationRequests}
+              onModificationChange={handleStrategyModificationChange}
+              onAddModification={handleAddStrategyModification}
+              onRemoveModification={handleRemoveStrategyModification}
+              onRefineStrategy={() => handleAnalyzeStrategy(true)}
+              onAcceptOrPopulate={() => setIsStrategyAccepted(true)}
+              isAccepted={isStrategyAccepted}
+            />
+          )}
+
+          {isStrategyAccepted && latestConsultationRound && (
+              <div className="mt-4 p-3 rounded border border-green-700 bg-green-900/30 text-green-300 text-sm">
+                  Strategy accepted (Type: {latestConsultationRound.analysis.recommendedType}). You can now generate the implementation or save the tool.
+              </div>
+          )}
+          {isAnalyzingStrategy && <p className="text-yellow-400 mt-4">Analyzing strategy...</p>}
+
+          {/* Mobile Helpers Section */}
+          <div className="lg:hidden mt-8">
+            <HelpersCard
+              activeTab={activeHelperTab}
+              onTabChange={setActiveHelperTab}
+              renderTabContent={renderHelperTabContent} // Pass the render function
+            />
+          </div>
         </div>
+
+        {/* Sidebar / Helpers column - Only visible on large screens */}
         <div className="lg:col-span-4 space-y-8 hidden lg:block">
-            {/* Always visible Helpers section with tabs */}
-            <Card className="bg-slate-700 shadow-xl border-slate-600 border overflow-hidden sticky top-28 transition-all hover:shadow-indigo-900/20 hover:shadow-lg">
-                <CardHeader className="bg-gradient-to-r from-slate-700 to-purple-900 pb-3">
-                    <CardTitle className="text-purple-300 text-lg flex items-center">
-                        <span className="mr-2">🧰</span> Helpers
-                    </CardTitle>
-                    <CardDescription className="text-gray-200">Tools to assist with custom tool creation</CardDescription>
-                </CardHeader>
-                <CardContent className="p-0">
-                    <div className="border-b border-slate-600">
-                        <div className="flex">
-                            <button 
-                                className="px-4 py-2 text-sm font-medium text-purple-300 border-b-2 border-purple-500 focus:outline-none"
-                                aria-current="page"
-                            >
-                                Scraper Consultant
-                            </button>
-                            <button 
-                                className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200 hover:border-gray-400 border-b-2 border-transparent"
-                                disabled
-                            >
-                                More Soon...
-                            </button>
-                        </div>
-                    </div>
-                    <div className="p-4 space-y-4">
-                        <div className="grid w-full items-center gap-1.5">
-                            <Label htmlFor="consultantUrl" className="text-sm text-gray-200">Target Website URL</Label>
-                            <Input
-                                id="consultantUrl"
-                                value={consultantUrl}
-                                onChange={(e) => setConsultantUrl(e.target.value)}
-                                placeholder="https://example.com"
-                                disabled={isAnalyzing}
-                                type="url"
-                                className="border-purple-900 bg-slate-800 focus:border-purple-500 text-slate-200"
-                            />
-                        </div>
-                        <div className="grid w-full items-center gap-1.5">
-                            <Label htmlFor="consultantDataDesc" className="text-sm text-gray-200">Describe Data to Extract</Label>
-                            <Textarea
-                                id="consultantDataDesc"
-                                value={consultantDataDesc}
-                                onChange={(e) => setConsultantDataDesc(e.target.value)}
-                                placeholder="e.g., Extract product names, prices, and ratings"
-                                rows={2}
-                                disabled={isAnalyzing}
-                                className="border-purple-900 bg-slate-800 focus:border-purple-500 text-slate-200 text-sm"
-                            />
-                        </div>
-                        <Button 
-                            onClick={handleAnalyzeWebsite} 
-                            disabled={isAnalyzing || !userId || !consultantUrl}
-                            className="w-full bg-purple-700 hover:bg-purple-800 text-white"
-                        >
-                            {isAnalyzing ? 'Analyzing...' : 'Analyze Website for Scraping'}
-                        </Button>
-                        
-                        {/* Analysis Results Display - Condensed */}
-                        {analysisError && (
-                            <div className="text-red-400 border border-red-900 bg-red-900/25 p-2 rounded text-xs">
-                                <strong>Error:</strong> {analysisError}
-                            </div>
-                        )}
-                        {analysisResult && (
-                            <div className="border border-purple-900 rounded bg-slate-800 p-2 text-xs space-y-1">
-                                <p><strong>Status:</strong> <span className={analysisResult.status === 'success' ? 'text-green-400' : 'text-red-400'}>{analysisResult.status}</span></p>
-                                <p><strong>Method:</strong> {analysisResult.suggestedMethod || 'N/A'}</p>
-                                <Separator className="my-1 bg-slate-600" />
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full text-xs mt-1 border-purple-900 text-purple-300 bg-slate-800"
-                                    onClick={handlePopulateFromAnalysis}
-                                >
-                                    Use Results to Populate Form
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
+          <HelpersCard
+            activeTab={activeHelperTab}
+            onTabChange={setActiveHelperTab}
+            className="sticky top-28 transition-all hover:shadow-indigo-900/20 hover:shadow-lg"
+            renderTabContent={renderHelperTabContent} // Pass the render function
+          />
         </div>
       </div>
     </div> // End main container

@@ -38,7 +38,7 @@ import {
 
 import { LOAD_AGENT_TOOLS } from "./agent-tools/load-agent-tools";
 
-import { AGENT_TOOLS_agentGlobalState } from "@/src/app/api/pinecone/agent_global_state";
+import { AGENT_TOOLS_agentGlobalState } from "@/src/lib/agent-tools/agent-global-state/agent_global_state";
 import { AGENT_TOOLS_agentDiary } from "./agent-tools/agent-diary";
 // import { createAISDKTools } from "@agentic/ai-sdk";
 // import { SerpAPIClient } from "@agentic/serpapi";
@@ -86,6 +86,7 @@ import { AGENT_TOOLS_database } from "@/src/lib/agent-tools/database-tool/databa
 import { OrchestrationType2 } from "./orchestration/types";
 import { ORCHESTRATION_load_agent_tools } from "@/src/lib/orchestration/utils/load-agent-tools";
 import { OrchestrationConfig } from "@/src/lib/orchestration/types";
+import { MissingCredentialError } from "@/src/lib/agent-tools/load-agent-tools";
 
 //let _data: any;
 
@@ -410,6 +411,7 @@ export const agentChannelMessageRouter = async (
           minLength: 2,
         });
         return {
+          status: "ERROR",
           response: "Error in messageRouter: Message too short",
           history: [...messageHistory],
           context: contextSets,
@@ -646,53 +648,35 @@ export async function basicAgentChat(
   messageGoRound?: boolean,
   streaming?: boolean,
   textChatLogs?: TextChatLogProps[],
-  orchestrationProps?: OrchestrationProps
+  orchestrationProps?: OrchestrationProps,
+  orchestrationConfig?: OrchestrationConfig
 ): Promise<AgentUserResponse> {
-  // Add rate limiting delay
   await waitForRateLimit();
 
-  // Truncate helper function
-  const truncateMessage: (msg: string) => string = (msg: string) => {
+  const truncateMessage = (msg: string): string => {
     const MAX_LENGTH = 12000;
     return msg.length > MAX_LENGTH ? msg.slice(0, MAX_LENGTH) + '...' : msg;
   };
 
-  // Initialize capturedVariables with default values
-  let capturedVariables = {
-    agent: {} as AgentComponentProps,
-    currentConversation: [] as ServerMessage[],
-    truncatedPrompt: "",
-    _prompt: "",
-    convoTwo: { response: "", state: {} as AISessionState, history: [] as ServerMessage[] },
-    conversationLevel: 0,
-    _tools: {},
-    _providerOptions: {}
-  };
+  let capturedVariables: any = { agent: null, _tools: {} };
 
   try {
     let agent: AgentComponentProps | undefined;
     if (agentFoundationalPromptProps) {
-      agent = agentsByName.agents.find(
-        (agent) =>
-          agent.name === agentFoundationalPromptProps?.thisAgentName
-      ) as AgentComponentProps;
+      agent = agentsByName.agents.find(a => a.name === agentFoundationalPromptProps?.thisAgentName);
     } else if (orchestrationProps?.currentAgent) {
       agent = orchestrationProps.currentAgent;
     }
-
     if (!agent) {
       logger.error("Agent not found", {
         agentName:
           agentFoundationalPromptProps?.thisAgentName ||
           orchestrationProps?.currentAgent?.name,
       });
-      throw new Error(
-        `Agent '${
-          agentFoundationalPromptProps?.thisAgentName ||
-          orchestrationProps?.currentAgent?.name
-        }' not found`
-      );
+      throw new Error("Agent not found");
     }
+
+    capturedVariables.agent = agent;
 
     logger.agent(`Starting conversation with ${agent.name}: ${message}`, {
       action: "CHAT_START",
@@ -700,7 +684,6 @@ export async function basicAgentChat(
     });
 
     const vectorStore = await GLOBAL_getVectorStoreClient();
-
     let conversationLevel = 0;
 
     const _prompt = await _generateDynamicPrompt(
@@ -710,9 +693,10 @@ export async function basicAgentChat(
       orchestrationProps,
       contextSets
     );
+    const truncatedPrompt = truncateMessage(_prompt);
+    capturedVariables.truncatedPrompt = truncatedPrompt;
+    capturedVariables._prompt = _prompt;
 
-    // Format the user message
-    logger.log(`${agent.name} formatting user message: ${message}`, { message });
     const formattedUserMessage: ServerMessage = {
       role: "user",
       content: message,
@@ -721,11 +705,9 @@ export async function basicAgentChat(
       conversationLevel: conversationLevel,
     };
 
-    // Check if agent is a manager type
     const isManager = agent.type === "manager";
     const isAgentOrchestrator = orchestrationProps?.chatMode === OrchestrationType2.LLM_ROUTED_WORKFLOW || orchestrationProps?.chatMode === OrchestrationType2.MANAGER_DIRECTED_WORKFLOW;
     
-    // Create conversation history based on agent type and orchestration mode
     const summarizedHistory = createSummarizedHistory(messageHistory, isManager, orchestrationProps);
     
     logger.log(`${agent.name} creating conversation history`, {
@@ -736,10 +718,10 @@ export async function basicAgentChat(
       historyLength: summarizedHistory.length
     });
     
-    // Use empty or summarized history based on agent type
     const currentConversation = [...summarizedHistory, formattedUserMessage];
+    capturedVariables.currentConversation = currentConversation;
+    capturedVariables.conversationLevel = conversationLevel;
 
-    // If we're including history, log token savings (only in summarization mode)
     if (isManager && !isAgentOrchestrator && messageHistory.length > 0) {
       const originalTokens = messageHistory.reduce((acc, msg) => acc + estimateTokenCount(msg.content || ""), 0);
       const summarizedTokens = summarizedHistory.reduce((acc, msg) => acc + estimateTokenCount(msg.content || ""), 0);
@@ -765,11 +747,6 @@ export async function basicAgentChat(
       context: message,
     });
 
-    // Truncate prompt to avoid rate limits
-    const truncatedPrompt = truncateMessage(_prompt);
-    logger.log(`Prompt length after truncation: ${truncatedPrompt.length} characters`);
-
-    // Before making the API call
     const promptAndConversationSize = estimateTokenCount(truncatedPrompt) + 
       currentConversation.reduce((acc, msg) => acc + estimateTokenCount(msg.content || ""), 0);
     
@@ -787,39 +764,61 @@ export async function basicAgentChat(
       });
     }
 
-    // Construct necessary parts for orchestrationConfig
-    const orchestrationConfig: OrchestrationConfig = {
-        agents: agentsByName.agents,
-        userId: userId,
-        teamName: teamName,
-        type: orchestrationProps?.chatMode || OrchestrationType2.DIRECT_AGENT_INTERACTION,
-        currentAgentName: agent.name,
-        initialMessage: message,
-        objectives: state.currentAgents.objectives,
-    };
+    let _tools = {};
+    try {
+      _tools = await ORCHESTRATION_load_agent_tools(
+          agent,
+          orchestrationConfig as OrchestrationConfig,
+          contextSets,
+          currentConversation,
+          vectorStore,
+          textChatLogs || [],
+          state.currentAgents.objectives,
+          state
+      );
+      capturedVariables._tools = _tools;
+      const loadedToolKeys = await UTILS_getObjectKeysOfLoadedTools(_tools);
+      logger.tool(`Tools loaded for ${agent.name} via ORCHESTRATION_load_agent_tools:`, {
+        agentName: agent.name,
+        toolCount: loadedToolKeys.length,
+        toolKeys: loadedToolKeys
+      });
+      console.log(`Tools loaded for ${agent.name}:`, loadedToolKeys);
 
-    // Call the unified tool loader
-    const _tools = await ORCHESTRATION_load_agent_tools(
-        agent,
-        orchestrationConfig,
-        contextSets,
-        currentConversation,
-        vectorStore,
-        textChatLogs || [],
-        state.currentAgents.objectives,
-        state
-    );
+    } catch (error) {
+        if (error instanceof MissingCredentialError) {
+            const credName = error.credentialName || 'UNKNOWN';
+            logger.warn(`Credential required for ${agent.name} in basicAgentChat: ${credName}`);
+            return {
+                status: 'REQUIRES_CREDENTIAL_INPUT',
+                message: `Agent ${agent.name} requires the credential '${credName}' to proceed.`,
+                credentialName: credName,
+                agentProps: agentFoundationalPromptProps,
+                response: "",
+                history: messageHistory,
+                context: contextSets,
+                nextAction: "none",
+                prompt: _prompt,
+                textChatLogs: [],
+            };
+        } else {
+            logger.error(`Unexpected error loading tools for ${agent.name} in basicAgentChat:`, { error });
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return {
+                 status: 'ERROR',
+                 message: `Failed to load tools for agent ${agent.name}: ${errorMessage}`,
+                 agentProps: agentFoundationalPromptProps as AgentFoundationalPromptProps,
+                 response: "",
+                 history: messageHistory,
+                 context: contextSets,
+                 nextAction: "none",
+                 prompt: _prompt,
+                 textChatLogs: [],
+                 error: errorMessage,
+            };
+        }
+    }
 
-    // Log the keys of the loaded tools
-    const loadedToolKeys = await UTILS_getObjectKeysOfLoadedTools(_tools);
-    logger.tool(`Tools loaded for ${agent.name} via ORCHESTRATION_load_agent_tools:`, {
-      agentName: agent.name,
-      toolCount: loadedToolKeys.length,
-      toolKeys: loadedToolKeys
-    });
-    console.log(`Tools loaded for ${agent.name}:`, loadedToolKeys);
-
-    // Provider options logic remains the same
     let _providerOptions = {};
     if (agent.modelArgs.modelName === "claude-3-7-sonnet-20250219") {
       _providerOptions = {
@@ -833,11 +832,7 @@ export async function basicAgentChat(
         providerOptions: _providerOptions,
       });
     }
-
-    // Update capturedVariables with actual values (now includes the correctly loaded _tools)
-    capturedVariables = {
-      agent, currentConversation, truncatedPrompt, _prompt, convoTwo, conversationLevel, _tools, _providerOptions
-    };
+    capturedVariables._providerOptions = _providerOptions;
 
     const response = await generateText({
       model: await MODEL_getModel_ai(agent.modelArgs),
@@ -878,14 +873,15 @@ export async function basicAgentChat(
     };
 
     return {
+      status: 'COMPLETED',
       response: response.text,
       history: [...currentConversation, formattedResponseMessage],
       context: contextSets,
       agentProps: agentFoundationalPromptProps,
       nextAction: "none",
       prompt: _prompt,
-      textChatLogs: textChatLogs || [],
-    } as AgentUserResponse;
+      textChatLogs: [],
+    };
 
   } catch (error) {
     if (error instanceof Error && error.message.includes("Overloaded")) {
@@ -919,6 +915,7 @@ export async function basicAgentChat(
           });
           
           return {
+            status: 'COMPLETED',
             response: retryResponse.text,
             history: [...capturedVariables.currentConversation, {
               role: "assistant", content: retryResponse.text, agentName: capturedVariables.agent.name,
@@ -930,8 +927,8 @@ export async function basicAgentChat(
             agentProps: agentFoundationalPromptProps,
             nextAction: "none",
             prompt: capturedVariables._prompt,
-            textChatLogs: textChatLogs || [],
-          } as AgentUserResponse;
+            textChatLogs: [],
+          };
         } catch (retryError) {
           lastError = retryError as Error;
           retryCount++;
@@ -948,8 +945,20 @@ export async function basicAgentChat(
         }
       }
     }
-    logger.error("Error in basicAgentChat", { error: error instanceof Error ? error.message : String(error), agent: capturedVariables.agent.name || 'Unknown' });
-    throw error;
+    logger.error("Error in basicAgentChat", { error: error instanceof Error ? error.message : String(error), agent: capturedVariables.agent?.name || 'Unknown' });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+        status: 'ERROR',
+        message: `Error during agent chat: ${errorMessage}`,
+        agentProps: agentFoundationalPromptProps,
+        response: "",
+        history: messageHistory,
+        context: contextSets,
+        nextAction: "none",
+        prompt: capturedVariables._prompt || "",
+        textChatLogs: [],
+        error: errorMessage,
+    };
   }
 }
 

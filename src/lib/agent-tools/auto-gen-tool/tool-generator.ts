@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { logger } from "../../logger";
 import { tool } from "ai";
-import { getAgentToolsRegistry } from "./auto-gen-tool_core";
+// Removed: import { getAgentToolsRegistry } from "./auto-gen-tool_core";
 // Removed: logger, getAgentToolsRegistry
 
 // Interface for tool parameter definition (Client-safe)
@@ -83,36 +83,4 @@ export const UTILS_buildParameterSchema = (parameters: ToolParameter[]): z.ZodOb
   });
   
   return z.object(schemaFields);
-};
-
-/**
- * Registers a dynamic tool with an agent
- */
-export const UTILS_registerDynamicTool = async (
-  agentName: string,
-  toolName: string,
-  toolFunction: any
-): Promise<void> => {
-  logger.tool("Tool Generator - Registering Tool", {
-    agentName,
-    toolName
-  });
-  
-  try {
-    const registry = await getAgentToolsRegistry(agentName);
-    registry[toolName] = toolFunction;
-    
-    logger.tool("Tool Generator - Registered Successfully", {
-      agentName,
-      toolName
-    });
-  } catch (error) {
-    logger.error("Tool Generator - Registration Failed", {
-      agentName,
-      toolName,
-      error: error instanceof Error ? error.message : "Unknown error"
-    });
-    
-    throw new Error(`Failed to register tool: ${error instanceof Error ? error.message : "Unknown error"}`);
-  }
 };

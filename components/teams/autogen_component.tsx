@@ -7,7 +7,7 @@ import {
   Team,
 } from "@/src/lib/types";
 import { useAnalysisStore } from "@/src/lib/store/analysis-store";
-import { AutoGenTeam, AutoGenWorkflowProps } from "@/src/lib/autogen/autogen";
+import { AutoGenTeam, AutoGenWorkflowProps } from "@/src/lib/autogen/autogen-types";
 import { useEffect, useState } from "react";
 import AutoGenWorkflowComponent from "./auto_gen_wf";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,8 @@ import { DYNAMIC_NAMES } from "@/src/lib/dynamic-names";
 import { GeneralPurpose } from "@prisma/client";
 import { SERVER_getGeneralPurposeDataSingleById } from "@/src/lib/server";
 import { useUser } from "@clerk/nextjs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Terminal } from "lucide-react";
 
 const saveWorkflowToDatabase = async (
   name: string,
@@ -215,6 +217,8 @@ export default function AutogenComponent({
   const { handleTeamAutoGen, localState } = useAnalysisStore();
   const { currentAgents: team } = localState;
 
+  const [requiredCredentialsList, setRequiredCredentialsList] = useState<string[]>([]);
+
   const setTeam = (props: AutoGenWorkflowProps) => {
     console.log("Setting Generated team");
     console.log("!!!_props!!!", props);
@@ -299,6 +303,7 @@ export default function AutogenComponent({
 
     if (result.error) {
       alert(result.error.message);
+      setRequiredCredentialsList([]);
     } else {
       const outlineObject = JSON.parse(
         result.outlineObjectString ?? "{}"
@@ -306,9 +311,14 @@ export default function AutogenComponent({
       setAutoGenWorkflow(outlineObject);
       setWorkflowModifications([]);
       setModificationStore(result.modificationStore ?? []);
-      setWorkflowModified(true); // Mark workflow as modified after generation
+      setWorkflowModified(true);
       
-      alert("Team auto-generation successful");
+      if (result.requiredCredentials && result.requiredCredentials.length > 0) {
+        setRequiredCredentialsList(result.requiredCredentials);
+        console.log("Required credentials identified:", result.requiredCredentials);
+      } else {
+        setRequiredCredentialsList([]);
+      }
     }
   };
 
@@ -327,7 +337,8 @@ export default function AutogenComponent({
       setAutoGenWorkflow(null);
       setWorkflowModifications([]);
       setModificationText("");
-      setWorkflowModified(false); // Reset modification state
+      setWorkflowModified(false);
+      setRequiredCredentialsList([]);
     }
   };
 
@@ -353,7 +364,7 @@ export default function AutogenComponent({
         userId
       );
       setSaveDialogOpen(false);
-      setWorkflowModified(false); // Reset modification state after save
+      setWorkflowModified(false);
       alert(`Workflow "${workflowName}" saved successfully!`);
 
       // Refresh the list of saved workflows
@@ -375,7 +386,7 @@ export default function AutogenComponent({
         setWorkflowModifications([]);
         setTeamName(workflow.team_name || "");
         setTeamObjective(workflow.team_objective || "");
-        setWorkflowModified(false); // Reset modification state after loading
+        setWorkflowModified(false);
       }
     } catch (error) {
       console.error("Error loading workflow:", error);
@@ -406,12 +417,13 @@ export default function AutogenComponent({
 
     // Load saved workflows on component mount
     loadSavedWorkflows(user?.id ?? "");
+    setRequiredCredentialsList([]);
   }, []);
 
   // Handle workflow modifications
   const handleWorkflowChange = (updatedWorkflow: AutoGenTeam) => {
     setAutoGenWorkflow(updatedWorkflow);
-    setWorkflowModified(true); // Mark as modified when workflow is updated
+    setWorkflowModified(true);
   };
 
   return (
@@ -462,7 +474,7 @@ export default function AutogenComponent({
                   modificationText,
                 ]);
                 setModificationText("");
-                setWorkflowModified(true); // Mark as modified when adding modifications
+                setWorkflowModified(true);
               }
             }}
           >
@@ -573,6 +585,21 @@ export default function AutogenComponent({
       {/* Workflow component - Only shows when a workflow is defined */}
       {autoGenWorkflow && (
         <div className="flex flex-col items-center h-[calc(100vh-10rem)] overflow-y-auto">
+          {requiredCredentialsList.length > 0 && (
+            <Alert variant="default" className="mb-4 border-yellow-500 text-yellow-400 bg-yellow-900/30">
+              <Terminal className="h-4 w-4 !text-yellow-400" />
+              <AlertTitle className="text-yellow-300">Credentials Required</AlertTitle>
+              <AlertDescription>
+                This generated workflow uses tools that require the following credential(s):
+                <ul className="list-disc list-inside mt-1">
+                  {requiredCredentialsList.map((credName) => (
+                    <li key={credName}>{credName}</li>
+                  ))}
+                </ul>
+                You may be prompted to provide them during execution if they haven't been saved yet.
+              </AlertDescription>
+            </Alert>
+          )}
           <AutoGenWorkflowComponent
             autoGenWorkflow={autoGenWorkflow}
             setAutoGenWorkflow={handleWorkflowChange}

@@ -3,6 +3,9 @@ import { isCustomToolReference, getCustomToolId } from "@/src/lib/agent-tools/to
 import { logger } from "@/src/lib/logger";
 import { CustomToolDefinition } from '@/src/lib/agent-tools/auto-gen-tool/tool-generator';
 import { z, ZodTypeAny } from 'zod';
+import { getDecryptedCredential } from '@/src/lib/security/credentials';
+import { MissingCredentialError } from "../../agent-tools/load-agent-tools";
+import { ToolRegistryEntry } from "@/src/lib/agent-tools/tool-registry/ct-types";
 
 /**
  * Loads custom tools from the registry for use in orchestration
@@ -16,6 +19,12 @@ export async function loadCustomToolsForOrchestration(
   toolNames: (string | undefined)[],
   userId: string
 ): Promise<Record<string, any>> {
+  const clerkId = userId;
+  if (!clerkId) {
+    logger.error("loadCustomToolsForOrchestration called without clerkId.", { agentName });
+    throw new Error("User ID (clerkId) is required to load custom tools.");
+  }
+
   try {
     const customTools: Record<string, any> = {};
     
@@ -71,16 +80,7 @@ export async function loadCustomToolsForOrchestration(
     }
     
     // Define the factory function - **IMPORTANT**: it now expects the Prisma-like type
-    function createToolExecutor(toolEntry: { // Use an inline type or import the Prisma type if available
-        id?: string | undefined;
-        name: string;
-        description: string;
-        parameters: string; // Expecting JSON string
-        implementation: string;
-        implementationType: string;
-        metadata?: string | undefined;
-        version?: number | undefined;
-    }) {
+    function createToolExecutor(toolEntry: ToolRegistryEntry) {
        // ... (rest of factory function - make sure it uses toolEntry.implementation, not functionBody) ...
        // This outer function receives the specific toolEntry for *one* tool.
 
@@ -92,6 +92,11 @@ export async function loadCustomToolsForOrchestration(
              toolId: toolEntry.id,
              params,
            });
+
+           // === Potential Place for Just-In-Time Credential Fetch ===
+           // If we adopted Option B earlier, we would check for a marker here
+           // and call getDecryptedCredential just before execution.
+           // For now, we assume the credential check happened earlier (in the loop below).
 
            // The rest of your existing switch logic using toolEntry
            switch (toolEntry.implementationType) {
@@ -165,7 +170,6 @@ export async function loadCustomToolsForOrchestration(
     for (const ref of customToolRefs) {
       try {
         const toolId = getCustomToolId(ref as string);
-        // REMOVE the cast to CustomToolDefinition
         const toolEntry = await ToolRegistry.getToolById(toolId);
 
         if (!toolEntry) {
@@ -173,18 +177,30 @@ export async function loadCustomToolsForOrchestration(
           continue;
         }
 
-        // 1. Parse the 'parameters' JSON string using the new helper
-        const parametersSchema = parseZodSchemaFromToolParameters(toolEntry.parameters); // Use toolEntry.parameters (JSON string)
+        // --- BEGIN CREDENTIAL CHECK ---
+        if (toolEntry.requiredCredentialNames && toolEntry.requiredCredentialNames.length > 0) {
+          for (const credentialName of toolEntry.requiredCredentialNames) {
+            logger.debug(`Tool "${toolEntry.name}" requires credential: ${credentialName}. Checking...`, { agentName, toolId });
+            const credentialValue = await getDecryptedCredential(clerkId, credentialName);
 
-        // 2. Construct the final tool object for the AI SDK
+            if (credentialValue === null) {
+              logger.warn(`Required credential "${credentialName}" missing for tool "${toolEntry.name}". Aborting tool load.`, { agentName, toolId, clerkId });
+              throw new MissingCredentialError(credentialName);
+            } else {
+              logger.debug(`Credential "${credentialName}" found for tool "${toolEntry.name}". Proceeding.`, { agentName, toolId });
+            }
+          }
+        }
+        // --- END CREDENTIAL CHECK ---
+
+        const parametersSchema = parseZodSchemaFromToolParameters(toolEntry.parameters);
+
         const finalToolObject = {
           description: toolEntry.description || "No description provided.",
           parameters: parametersSchema,
-          // 3. Use the factory function to create the correctly scoped execute function
-          execute: createToolExecutor(toolEntry), // Pass the Prisma-like object
+          execute: createToolExecutor(toolEntry),
         };
 
-        // 4. Add it to the collection, keyed by the tool's name
         if(customTools[toolEntry.name]) {
              logger.warn(`Duplicate custom tool name detected: ${toolEntry.name}. Overwriting.`, { toolId: toolEntry.id, agentName });
         }
@@ -193,13 +209,19 @@ export async function loadCustomToolsForOrchestration(
         logger.debug(`Successfully prepared custom tool: ${toolEntry.name}`, { toolId: toolEntry.id, agentName });
 
       } catch (error) {
+        if (error instanceof MissingCredentialError) {
+            throw error;
+        }
         logger.error(`Error processing custom tool reference ${ref}`, { error, agentName });
       }
     }
     
     return customTools;
   } catch (error) {
-    logger.error("Error in loadCustomToolsForOrchestration", { error, agentName });
+    if (error instanceof MissingCredentialError) {
+        throw error;
+    }
+    logger.error("Failed to load custom tools for orchestration", { error, agentName });
     return {};
   }
 } 

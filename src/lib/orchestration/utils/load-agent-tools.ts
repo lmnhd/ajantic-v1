@@ -192,7 +192,7 @@ export async function ORCHESTRATION_load_agent_tools(
               case AI_Agent_Tools.GMAIL: toolSet = AGENT_TOOLS_gmail(textChatLogs || [], orchestrationConfig.userId || ""); break;
               case AI_Agent_Tools.OAUTH_PROVIDER: toolSet = AGENT_TOOLS_NEXT_AUTH( orchestrationConfig.userId || "", "", currentAgent, contextSets, vectorStore, textChatLogs || [] ); break;
               case AI_Agent_Tools.DOCUMENT_PARSE: toolSet = AGENT_TOOLS_DOCUMENT_PARSE(); break;
-              case AI_Agent_Tools.AUTO_GEN_TOOL: toolSet = AGENT_TOOLS_autoGenTool(currentAgent.name, orchestrationConfig.userId || "", textChatLogs || []); break;
+              case AI_Agent_Tools.AUTO_GEN_TOOL: toolSet = AGENT_TOOLS_autoGenTool(orchestrationConfig.userId || "", textChatLogs || []); break;
               case AI_Agent_Tools.DOCUMENT_PROCESSOR: toolSet = AGENT_TOOLS_documentProcessor(orchestrationConfig.userId || "", currentAgent.name, textChatLogs || []); break;
               case AI_Agent_Tools.VIDEO_GEN: toolSet = AGENT_TOOLS_video(orchestrationConfig.userId || "", currentAgent.name); break;
               case AI_Agent_Tools.TEXT_SPLITTER: toolSet = AGENT_TOOLS_splitters(state, textChatLogs || []); break;
