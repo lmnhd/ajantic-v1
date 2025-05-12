@@ -26,6 +26,10 @@ import { PostMessageAnalysisProps } from "./analysis_server";
 // import { BedrockModelNames } from "@/src/app/api/model/bedrock";
 import { OrchestrationType2 } from "./orchestration/types/base";
 
+
+import { Message as VercelAIMessage } from 'ai';
+import { StrategyAnalysis } from '../app/api/playground/analyze-implementation-strategy/_types';
+
 export type Top100Songs = {
   title: string;
   artist: string;
@@ -313,6 +317,7 @@ export interface ToolRequest {
     output: any;
   }[];
   additionalContext?: string; // Any extra information
+  acceptedStrategy?: StrategyAnalysis | null;
 
   // Legacy properties (for backward compatibility)
   toolName?: string; // Alias for name

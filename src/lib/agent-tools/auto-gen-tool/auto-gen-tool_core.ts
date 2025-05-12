@@ -19,6 +19,9 @@ import { createCustomToolReference, getCustomToolId, isCustomToolReference } fro
 import { ToolFactory } from "../tool-registry/factory"; // Import ToolFactory
 // ** Removed unused UTILS_callLargeLanguageModel import **
 
+// Import StrategyAnalysis type (adjust path as needed)
+import { AnalysisResult, PreliminaryResearchIdentifiers } from '../../../app/api/playground/analyze-implementation-strategy/_types';
+
 // --- Zod Schemas (remain the same) ---
 const toolParameterSchema = z.object({
   name: z.string().describe("Parameter name (snake_case)"),
@@ -33,7 +36,12 @@ const refinedToolDefinitionSchema = z.object({
     description: z.string().describe("The final, potentially refined, tool description."),
     inputs: toolParametersSchema.describe("The final, potentially refined, list of input parameters."),
     expectedOutput: z.string().describe("The final, potentially refined, description of the expected output."),
-    implementation: z.string().min(1).describe("The generated JavaScript/TypeScript function body code (as a string). MUST NOT be empty."),
+    implementation: z.string().min(1).describe("The generated JavaScript/TypeScript function body code (as a string) OR the API configuration JSON (as a string). MUST NOT be empty."),
+    implementationType: z.enum(["api", "function"]).describe("The type of implementation: 'api' for an API configuration JSON, 'function' for a JavaScript/TypeScript arrow function."),
+    requiredCredentialNames: z.array(z.object({
+        name: z.string().describe("The environment variable style name for the credential, e.g., SERVICE_API_KEY"),
+        label: z.string().describe("A user-friendly label for the credential, e.g., Service API Key")
+    })).optional().describe("An array of objects detailing required credentials for the tool, if any."),
 }).describe("The complete, potentially refined tool definition including the implementation code.");
 type RefinedToolDefinition = z.infer<typeof refinedToolDefinitionSchema>;
 
@@ -48,14 +56,19 @@ type RefinedToolDefinition = z.infer<typeof refinedToolDefinitionSchema>;
  *
  * @param toolRequest - The detailed request for the tool.
  * @param modelArgs - The model arguments for generation.
+ * @param acceptedStrategy - The accepted strategy for generation.
  * @returns A promise resolving to the refined tool definition including implementation.
  * @throws Throws an error if generation fails.
  */
 export async function CORE_generateCustomToolDefinition(
   toolRequest: ToolRequest,
-  modelArgs: ModelArgs // Add modelArgs parameter
+  modelArgs: ModelArgs,
+  acceptedStrategy?: AnalysisResult | null // <-- Changed type to AnalysisResult
 ): Promise<RefinedToolDefinition> {
   logger.info(`CORE: Generating definition & implementation for: ${toolRequest.name} using model ${modelArgs.modelName}`);
+  if (acceptedStrategy) {
+    logger.info(`CORE: Using accepted strategy - Type: ${acceptedStrategy.recommendedType}`);
+  }
 
   // Ensure the request is in the unified format (optional, depends on if you need adapter)
   // const unifiedRequest = await ensureUnifiedToolRequest(toolRequest);
@@ -77,54 +90,135 @@ export async function CORE_generateCustomToolDefinition(
         ? request.inputs.map(p => `- ${p.name} (${p.type}): ${p.description}${p.required === false ? ' (optional)' : ''}${p.default !== undefined ? ` (default: ${JSON.stringify(p.default)})` : ''}`).join('\n')
         : '  (No input parameters defined)';
 
+  // --- Accepted Strategy String for Prompt ---
+  let acceptedStrategyString = '(No specific strategy pre-defined, rely on tool details and modification requests.)';
+  if (acceptedStrategy) {
+    const prelimFindingsStr = acceptedStrategy.preliminaryFindings ? `\n*   **Preliminary Findings:** ${acceptedStrategy.preliminaryFindings}` : "";
+    const credNameStr = acceptedStrategy.requiredCredentialName ? `\n*   **Required Credential Name (from strategy):** ${acceptedStrategy.requiredCredentialName}` : "";
+    const warningsStr = acceptedStrategy.warnings && acceptedStrategy.warnings.length > 0 ? `\n*   **Warnings:** ${acceptedStrategy.warnings.join('; ')}` : "\n*   **Warnings:** None";
+    
+    acceptedStrategyString = `
+*   **Recommended Type:** ${acceptedStrategy.recommendedType}
+*   **Strategy Details:** ${acceptedStrategy.strategyDetails}${warningsStr}${credNameStr}${prelimFindingsStr}
+    `.trim();
+  }
+
   // --- XML-Style System Prompt ---
   const systemPrompt = `
-You are an expert JavaScript/TypeScript developer tasked with creating OR MODIFYING the function body for a custom tool.
-Your goal is to generate a robust, efficient, and correct standalone async function implementation based ONLY on the provided details.
+You are an expert JavaScript/TypeScript developer tasked with creating OR MODIFYING the function body and structure for a custom tool.
+Your goal is to generate a robust, efficient, and correct standalone async function implementation and a refined tool definition based ONLY on the provided details.
 
 <instructions>
-1.  **Generate/Modify Implementation:** Write the complete JavaScript/TypeScript async function body.
-    *   If '<current_implementation>' is provided below, use it as your starting point and apply the necessary changes based on the tool details and any '<modification_requests>'. Focus on modifying the existing code.
-    *   If no '<current_implementation>' is provided, generate the function body from scratch based on the '<tool_details>'.
-    *   **CRITICAL FORMAT:** The implementation MUST be an asynchronous arrow function expression that accepts a single object argument destructuring the parameters defined in '<tool_details>'. It MUST start exactly like: \`async ({ ${request.inputs.map(p => p.name).join(', ')} }) => {\` (using the actual parameter names) followed by the function body and ending with \`}\`.
-    *   **DO NOT** include a standard function declaration like \`function toolName(...)\` or \`async function toolName(...)\`. ONLY provide the arrow function expression as described.
-    *   Use standard Node.js built-in modules ONLY if absolutely necessary (like 'fs', 'path', 'crypto'). AVOID external libraries unless explicitly requested in '<modification_requests>' or '<tool_details>'. Check '<additional_context>' for allowed helper functions (e.g., executeFirecrawlScrape, executeVisualScrape) and import them if needed (e.g., from '@/src/lib/agent-tools/helpers/...').
-    *   Include error handling (try/catch blocks inside the arrow function body).
-    *   Return a value matching the 'Expected Output' description in '<tool_details>'. Return \`{ success: false, error: 'message' }\` on failure from within the arrow function body.
-    *   Focus on clear, readable, and correct code. Ensure the final code aligns with ALL instructions, especially modification requests.
+1.  **Understand Context:** Review all provided information: \`<tool_details>\`, \`<accepted_strategy>\` (if available), \`<current_implementation>\` (if available), and any \`<modification_requests>\`.
+    *   **CRITICAL: If \`<accepted_strategy>\` is provided, it is the PRIMARY GUIDE for your implementation approach and structural decisions.** Adhere to its \`recommendedType\`. Use its \`strategyDetails\` (like API endpoints or suggested helper functions) and heed its \`warnings\`.
 
-2.  **Refine Structure (If Necessary):** Review the parameters and output details. If modifications are needed based on the purpose or requests, update the \`inputs\` array or \`expectedOutput\` string in your JSON response. Ensure the parameter destructuring in your generated \`implementation\` string matches the *final* \`inputs\` you return. If no structural changes are needed, return the original details.
+2.  **Determine Implementation Type:**
+    *   Based on the strategy (especially \`recommendedType\`) or the nature of the tool request, decide if this is an 'api' tool or a 'function' tool.
+    *   If the tool is an API integration (based on strategy or requirements), follow the API Implementation Guidelines in point 3. Your \`implementationType\` output MUST be "api".
+    *   If the tool requires custom logic or non-API functionality, follow the Function Implementation Guidelines in point 4. Your \`implementationType\` output MUST be "function".
 
-3.  **Output Format:** Respond ONLY with a JSON object matching the required schema (${refinedToolDefinitionSchema.description}), containing the potentially refined \`name\`, \`description\`, \`inputs\`, \`expectedOutput\`, and the final \`implementation\` string (which must be the async arrow function expression).
-</instructions>
+3.  **API Implementation Guidelines:**
+    *   For API tools, the implementation field MUST be a JSON string containing the API configuration:
+    \`\`\`json
+    {
+      "endpoint": "https://api.example.com/endpoint",
+      "method": "GET|POST|PUT|DELETE",
+      "parameterMapping": {
+        "query": {
+          "apiParam": "toolInput",
+          "limit": "maxResults"
+        },
+        "body": {
+          "apiParam": "toolInput",
+          "limit": "maxResults"
+        }
+      }
+    }
+    \`\`\`
+    *   The \`parameterMapping\` object defines how tool input parameters map to API parameters:
+      - For GET requests, parameters will be mapped to query parameters
+      - For other methods, parameters will be mapped to the request body
+      - Each mapping entry specifies how a tool input parameter maps to an API parameter
+    *   Example API tool definition with parameter mapping:
+    \`\`\`json
+    {
+      "name": "Search API Tool",
+      "description": "Searches the API for matching items",
+      "inputs": [
+        {
+          "name": "searchQuery",
+          "type": "string",
+          "description": "The search query string",
+          "required": true
+        },
+        {
+          "name": "maxResults",
+          "type": "number",
+          "description": "Maximum number of results to return",
+          "required": false,
+          "default": 10
+        }
+      ],
+      "expectedOutput": "Returns search results as JSON",
+      "implementationType": "api",
+      "implementation": "{\\"endpoint\\": \\"https://api.example.com/search\\", \\"method\\": \\"GET\\", \\"parameterMapping\\": {\\"query\\": {\\"q\\": \\"searchQuery\\", \\"limit\\": \\"maxResults\\"}}}"
+    }
+    \`\`\`
+    *   If authentication is required:
+      - Add the credential name to the \`requiredCredentialNames\` array in your tool definition
+      - The system will automatically handle authentication using the stored credentials
+    *   The tool execution system will automatically handle:
+      - Authentication using stored credentials
+      - Request/response content type handling
+      - Error handling and status codes
+      - Response parsing (JSON, text, binary)
+      - Default timeout of 30 seconds
+      - Parameter mapping between tool inputs and API parameters
 
-<example_implementation_format>
+4.  **Function Implementation Guidelines:**
+    *   For non-API tools, write the complete JavaScript/TypeScript async function body.
+    *   If '<current_implementation>' is provided, use it as your starting point. Apply necessary changes based on the tool details, accepted strategy, and modification requests.
+    *   If no '<current_implementation>' is provided, generate the function body from scratch.
+    *   **FORMAT:** The implementation MUST be an asynchronous arrow function expression: \`async ({ param1, param2 }) => { ...body... }\`. It must accept a single object argument destructuring the parameters you define in the final \`inputs\` array of your response.
+    *   Use standard Node.js built-in modules ONLY if absolutely necessary. AVOID external libraries unless explicitly requested or indicated as allowed in '<additional_context>' or '<accepted_strategy>' (e.g., for specific helper functions).
+    *   Import allowed helpers if needed (e.g., \`const { executeFirecrawlScrape } = await import('@/src/lib/agent-tools/helpers/web-scraping');\`). Check '<additional_context>' and '<accepted_strategy>' for these.
+    *   Include robust error handling (try/catch blocks) within the arrow function body. Return a value matching the 'Expected Output' description. On failure, return \`{ success: false, error: 'message' }\`.
+    *   Example function implementation:
 \`\`\`javascript
 async ({ param1, optionalParam }) => {
-  // Optional: Import helpers if needed and allowed
-  // const { executeVisualScrape } = await import('@/src/lib/agent-tools/helpers/visual-scraping');
-
   try {
     // Your code here using param1 and optionalParam
     const result = await someAsyncTask(param1);
-    // Ensure the returned structure matches the 'Expected Output' description
     return { success: true, data: result };
   } catch (error) {
     console.error('Tool execution failed:', error);
-    // Provide a user-friendly error message if possible
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 \`\`\`
-</example_implementation_format>
+
+5.  **Refine Tool Definition (VERY IMPORTANT):**
+    *   Based on the '<tool_details>', '<modification_requests>', AND ESPECIALLY the '<accepted_strategy>' (if provided), you MUST review and potentially refine the tool's structural elements: 'name', 'description', 'inputs', 'expectedOutput', 'implementationType', and 'requiredCredentialNames'.
+    *   **Inputs:** Ensure parameter names, types, descriptions, required status, and default values are appropriate for the chosen implementation.
+    *   **Expected Output:** The description should accurately reflect what the generated implementation will return, considering the strategy.
+    *   **Implementation Type:** You MUST set the 'implementationType' field to either "api" or "function" based on your decision in step 2.
+    *   **Required Credential Names:** If the strategy or your implementation logic identifies a need for credentials (e.g., API keys, tokens), populate the 'requiredCredentialNames' array in your JSON output. Each item should be an object like \`{ "name": "SERVICE_API_KEY", "label": "Service API Key" }\`. Use the specific credential name from the strategy if provided, or a generic one if you infer it.
+    *   The final tool definition you output in JSON (name, description, inputs, expectedOutput, implementation, implementationType, requiredCredentialNames) MUST be consistent.
+
+6.  **Output Format:** Respond ONLY with a single JSON object matching the required schema (${JSON.stringify(refinedToolDefinitionSchema.shape, null, 2)}). This object must contain the potentially refined 'name', 'description', 'inputs', 'expectedOutput', 'implementation', 'implementationType', and 'requiredCredentialNames'.
+</instructions>
 
 <constraint_checklist>
-1. Implementation is an async arrow function \`async ({...}) => { ... }\`? Yes
-2. Returned data structure matches expected output description? Yes
-3. Handled potential errors within the function body? Yes
-4. Avoided external libraries (unless explicitly requested/allowed)? Yes
-5. If modifying, based changes on Current Implementation? Yes/No/NA
-6. Confidence Score (1-5): [Score]
+1. Implementation type correctly determined (API vs Function)? Yes
+2. Is the 'implementationType' field in the output JSON correctly set to "api" or "function"? Yes
+3. For API tools, included proper configuration JSON in 'implementation'? Yes/NA
+4. For Function tools, implementation is an async arrow function in 'implementation'? Yes/NA
+5. Returned data structure matches expected output description? Yes
+6. Handled potential errors appropriately? Yes
+7. Avoided external libraries (unless explicitly requested/allowed)? Yes
+8. If modifying, based changes on Current Implementation? Yes/No/NA
+9. Added required credentials to requiredCredentialNames? Yes/NA
+10. Confidence Score (1-5): [Score]
 </constraint_checklist>
 
 --- TOOL INFORMATION FOLLOWS ---
@@ -133,10 +227,14 @@ async ({ param1, optionalParam }) => {
 *   **Name:** ${request.name}
 *   **Description:** ${request.description}
 *   **Purpose:** ${request.purpose || request.description}
-*   **Input Parameters:**
+*   **Input Parameters (Initial):**
 ${parametersString}
-*   **Expected Output:** ${request.expectedOutput}
+*   **Expected Output (Initial):** ${request.expectedOutput}
 </tool_details>
+
+<accepted_strategy>
+${acceptedStrategyString}
+</accepted_strategy>
 
 ${request.additionalContext ? `<additional_context>\n${request.additionalContext}\n</additional_context>` : ''}
 
@@ -177,6 +275,9 @@ Provide ONLY the JSON output matching the schema.
     // Basic validation (can enhance further)
     if (!generatedDefinition.implementation || generatedDefinition.implementation.trim() === '') {
         throw new Error("Generated implementation is empty.");
+    }
+    if (generatedDefinition.implementationType !== "api" && generatedDefinition.implementationType !== "function") {
+        throw new Error(`Generated implementationType is invalid: ${generatedDefinition.implementationType}. Must be "api" or "function".`);
     }
     if (!Array.isArray(generatedDefinition.inputs)) {
         throw new Error("Generated 'inputs' field is not an array.");
@@ -250,8 +351,9 @@ export async function CORE_createToolFromRequest(
       refinedDefinition.description,
       refinedDefinition.inputs, // Pass the potentially refined inputs
       refinedDefinition.implementation,
-      "function",
-      metadata
+      refinedDefinition.implementationType, // Pass the determined implementationType
+      metadata,
+      toolRequest.acceptedStrategy ? JSON.stringify(toolRequest.acceptedStrategy) : null // Stringify acceptedStrategy
     );
 
     const toolId = getCustomToolId(toolRef); // Use helper to extract ID
@@ -315,6 +417,7 @@ export async function CORE_createToolsFromRequests(
             modelName: "gpt-4o", // Or your preferred default
             temperature: 0.7
         };
+        // Ensure acceptedStrategy is correctly passed; assuming it's part of ToolRequest
         const result = await CORE_createToolFromRequest(request, userId, defaultModelArgs);
         results[request.name] = result;
     }

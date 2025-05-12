@@ -12,7 +12,8 @@ export async function CUSTOM_TOOL_registerTool(
   parameters: any[],
   implementation: string,
   implementationType: string,
-  metadata: { [key: string]: any }
+  metadata: { [key: string]: any },
+  acceptedStrategyJson?: string | null
 ): Promise<string> {
   if (!userId) {
     logger.error("registerTool called without userId", { name });
@@ -35,6 +36,7 @@ export async function CUSTOM_TOOL_registerTool(
         implementation,
         implementationType,
         metadata: JSON.stringify(metadata),
+        acceptedStrategyJson: acceptedStrategyJson ?? undefined,
         version: 1,
       },
     });
@@ -59,6 +61,7 @@ export async function CUSTOM_TOOL_updateTool(
     implementation?: string;
     implementationType?: string;
     metadata?: { [key: string]: any };
+    acceptedStrategyJson?: string | null;
   }
 ): Promise<string> {
   try {
@@ -93,6 +96,7 @@ export async function CUSTOM_TOOL_updateTool(
         implementation: updates.implementation || currentTool.implementation,
         implementationType:
           updates.implementationType || currentTool.implementationType,
+        acceptedStrategyJson: updates.acceptedStrategyJson === null ? null : updates.acceptedStrategyJson ?? currentTool.acceptedStrategyJson,
         metadata: finalMetadata,
         version: currentTool.version + 1,
       },

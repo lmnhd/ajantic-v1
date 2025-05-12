@@ -5,6 +5,24 @@ import { getCustomToolId } from '@/src/lib/agent-tools/tool-registry/custom-tool
 import { z } from 'zod';
 import { Prisma } from '@prisma/client'; // Import Prisma for specific error handling
 
+// --- Schemas for Accepted Strategy (copied from generate-tool-definition/route.ts) ---
+const preliminaryResearchIdentifiersSchema = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  serviceName: z.string().optional(),
+  targetUrl: z.string().optional(),
+});
+
+const strategyAnalysisSchema = z.object({
+    recommendedType: z.enum(["api", "function"]),
+    strategyDetails: z.string(),
+    warnings: z.array(z.string()),
+    requiredCredentialName: z.string().optional().nullable(),
+    preliminaryFindings: z.string().optional(),
+    preliminaryResearchFor: preliminaryResearchIdentifiersSchema.optional(),
+});
+// --- End Schemas for Accepted Strategy ---
+
 // Schema for the expected DIRECT registration request body
 const toolCreateRequestSchema = z.object({
     userId: z.string().min(1, "User ID is required."), // Need userId to associate the tool
@@ -18,6 +36,7 @@ const toolCreateRequestSchema = z.object({
         default: z.any().optional()
     })),
     implementation: z.string().min(1, "Function implementation body is required"), // Must have implementation
+    implementationType: z.enum(["api", "function"]).optional().default("function"), // Added, defaults to function
     // Optional fields for metadata
     purpose: z.string().optional(),
     expectedOutput: z.string().optional(),
@@ -28,6 +47,7 @@ const toolCreateRequestSchema = z.object({
         input: z.record(z.any()),
         output: z.any()
     }))]).optional(),
+    acceptedStrategy: strategyAnalysisSchema.optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -50,12 +70,25 @@ export async function POST(req: NextRequest) {
             description,
             inputs,
             implementation,
+            implementationType,
             purpose,
             expectedOutput,
             category,
             additionalContext,
-            examples // Extract examples
+            examples, // Extract examples
+            acceptedStrategy, // Extract acceptedStrategy
         } = validationResult.data;
+
+        // --- Optional: Basic validation for API implementation string ---
+        if (implementationType === "api") {
+            try {
+                JSON.parse(implementation); // Check if it's valid JSON
+            } catch (e) {
+                logger.warn("API: Invalid JSON for API implementation string", { toolName: name, error: e });
+                return NextResponse.json({ error: "Implementation for 'api' type tools must be a valid JSON string." }, { status: 400 });
+            }
+        }
+        // --- End Optional Validation ---
 
         // Prepare metadata object
         const metadata: Record<string, any> = {
@@ -83,6 +116,26 @@ export async function POST(req: NextRequest) {
             }
         }
 
+        // Prepare acceptedStrategyJson
+        let acceptedStrategyJson: string | undefined = undefined;
+        if (acceptedStrategy) {
+            try {
+                // Validate the structure matches our schema
+                const validationResult = strategyAnalysisSchema.safeParse(acceptedStrategy);
+                if (!validationResult.success) {
+                    logger.warn("API: Invalid acceptedStrategy structure", { errors: validationResult.error.flatten() });
+                    return NextResponse.json({ error: "Invalid acceptedStrategy structure.", details: validationResult.error.flatten() }, { status: 400 });
+                }
+                acceptedStrategyJson = JSON.stringify(validationResult.data);
+                logger.info("API: Validated and prepared acceptedStrategy", { 
+                    recommendedType: validationResult.data.recommendedType,
+                    hasWarnings: validationResult.data.warnings.length > 0
+                });
+            } catch (error) {
+                logger.error("API: Failed to process acceptedStrategy", { error: error instanceof Error ? error.message : String(error) });
+                return NextResponse.json({ error: "Failed to process acceptedStrategy." }, { status: 400 });
+            }
+        }
 
         // Call ToolRegistry.registerTool directly
         const toolRef = await ToolRegistry.registerTool(
@@ -91,8 +144,9 @@ export async function POST(req: NextRequest) {
             description,
             inputs, // Pass validated inputs directly
             implementation,
-            "function", // Assuming type is always function for now
-            metadata
+            implementationType, // Pass the implementationType
+            metadata,
+            acceptedStrategyJson
         );
 
         const toolId = getCustomToolId(toolRef); // Use helper to extract ID
@@ -109,9 +163,11 @@ export async function POST(req: NextRequest) {
             definition: {
                 name: name,
                 description: description,
-                parameters: inputs, // Use 'parameters' key consistent with ToolDetails type?
+                parameters: inputs,
                 implementation: implementation,
-                expectedOutput: expectedOutput
+                implementationType: implementationType, // Include in response
+                expectedOutput: expectedOutput,
+                acceptedStrategy: acceptedStrategy // Include in response if present
             }
         });
 

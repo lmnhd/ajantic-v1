@@ -1,5 +1,5 @@
 ---
-description: 
+description: Custom-tool
 globs: 
 alwaysApply: false
 ---
@@ -9,68 +9,78 @@ This document outlines the custom tool playground and generation system within t
 
 ## Playground Environment
 
-*   **Playground UI:** [`src/app/playground/custom-tool/page.tsx`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/playground/custom-tool/page.tsx) - Interface for testing, generation, creation, and updating of custom tools.
-*   **Playground APIs:** Routes under `src/app/api/playground/` support the UI functions (list, details, execute, generate, create, update, quick-start, refine).
-*   **Model Selection:** [`ModelProviderSelect`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/components/global/model-provider-select.tsx) in the UI allows selecting `modelArgs` for generation.
+*   **Playground UI:** [`src/app/playground/custom-tool/page.tsx`](mdc:ajantic-v1/src/app/playground/custom-tool/page.tsx) - Interface for testing, generation, creation, and updating of custom tools.
+*   **Playground APIs:** Routes under `src/app/api/playground/` support the UI functions.
+    *   `analyze-implementation-strategy`: Provides an `acceptedStrategy` to guide AI generation.
+    *   `generate-tool-definition`: Generates tool structure and implementation via AI, now including `implementationType`.
+    *   `create-tool`: Directly creates a tool, now requiring `implementationType`.
+    *   `update-tool`: Updates a tool, now allowing changes to `implementationType`.
+    *   Others: `list`, `details`, `execute`, `quick-start`, `refine`.
+*   **Model Selection:** [`ModelProviderSelect`](mdc:ajantic-v1/components/global/model-provider-select.tsx) in the UI allows selecting `modelArgs` for generation.
 
 ## Core Generation & Registry
 
-*   **Core Logic:** [`src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts) contains central functions:
-    *   `CORE_generateCustomToolDefinition`: Generates/refines tool structure (`name`, `description`, `inputs`, `expectedOutput`) and `implementation` using AI, guided by `ToolRequest` and `modificationRequests`.
-    *   `CORE_createToolFromRequest`: Orchestrates generation and registration.
-    *   `createFunctionBodyPrompt`: Creates the prompt for the AI, including `modificationRequests`.
-*   **Tool Registry:** [`src/lib/agent-tools/tool-registry/registry.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/tool-registry/registry.ts) (`ToolRegistry`) manages persistence (DB interaction) for tool definitions.
+*   **Core Logic:** [`src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts`](mdc:ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts) contains central functions:
+    *   `CORE_generateCustomToolDefinition`: Generates/refines tool structure (`name`, `description`, `inputs`, `expectedOutput`, `implementationType`) and `implementation` using AI. Heavily influenced by `acceptedStrategy` (if provided) for choosing between `api` and `function` types. The `implementation` will be JSON for `api` type, and a code string for `function` type.
+    *   `CORE_createToolFromRequest`: Orchestrates AI generation and registration, passing `implementationType` and `acceptedStrategyJson` to the registry.
+*   **Tool Registry:** [`src/lib/agent-tools/tool-registry/registry.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/registry.ts) (`ToolRegistry`) manages persistence. Database actions in [`src/lib/agent-tools/tool-registry/ct-actions.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-actions.ts) now store `implementation_type` and `accepted_strategy_json`.
+*   **Validation Utilities:** [`src/lib/agent-tools/tool-registry/ct-utils.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-utils.ts) includes `validateImplementationString` which now uses a Zod schema for robust validation of API configuration JSON when `implementationType` is "api".
 
 ## Orchestration Loading & Execution
 
-*   **Loading Entry Point:** The primary mechanism for loading tools (both standard and custom) for agents within the orchestration workflow was refactored. Check functions like `ORCHESTRATION_load_agent_tools` (potentially in [`src/lib/agent-logic/load-agent-tools.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-logic/load-agent-tools.ts) or similar).
-*   **Core Loading Function:** The loading process likely relies on `loadToolsAndBuildRegistry` within [`src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts), which fetches all relevant tool definitions from the `ToolRegistry` and prepares executable versions.
-*   **Executable Wrappers:** `CORE_generateDynamicToolWrapper` in the core logic file creates the executable function wrappers (using `ai.tool`) needed for the agent runtime.
-*   **In-Memory Registry:** Loaded tools are stored in an in-memory registry (`agentToolsRegistry` in the core file) for efficient access during an agent's session.
-*   **Tool Execution:** Actual tool execution within the agent workflow likely involves resolving the tool function from the in-memory registry and potentially using a function like `createToolExecutor` to manage the execution context and arguments.
-*   **Agent-Specific Loading:** Be aware that specific agent types (e.g., RESEARCHER, MANAGER) might have slightly different tool loading requirements, including implicit tools.
+*   **Loading Entry Point:** `ORCHESTRATION_load_agent_tools` (e.g., in [`src/lib/orchestration/utils/custom-tool-loader.ts`](mdc:ajantic-v1/src/lib/orchestration/utils/custom-tool-loader.ts) or similar).
+*   **Tool Factory:** [`src/lib/agent-tools/tool-registry/factory.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/factory.ts) (`ToolFactory.buildTool`):
+    *   Reads `toolEntry.implementationType` from the fetched `ToolRegistryEntry`.
+    *   **If `implementationType` is "function":** Builds an executable JavaScript/TypeScript function from the `implementation` string.
+    *   **If `implementationType` is "api":** Parses the `implementation` string (which is a JSON configuration) and builds a generic API runner tool that makes HTTP calls using `fetch`. Handles credentials specified in `requiredCredentialNames` based on the API config's `authType`.
+    *   Uses `validateImplementationString` before attempting to build the tool.
+*   **Executable Wrappers:** The `ToolFactory` creates the executable tool objects (e.g., using `ai.tool` structure).
 
 ## Key Data Structures & Schemas
 
-*   **`ToolRequest`** ([`src/lib/types.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/types.ts)): Input for tool generation.
-*   **`toolRequestSchema`** (API Routes): Zod schema for validating frontend requests (includes `modificationRequests`, `modelArgs`).
-*   **`refinedToolDefinitionSchema`** (Core Logic): Zod schema defining the AI model's expected output format (refined structure + implementation).
-*   **`CustomToolDefinition`** ([`src/lib/agent-tools/auto-gen-tool/tool-generator.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/auto-gen-tool/tool-generator.ts)): Interface representing a loaded/stored tool definition.
+*   **`ToolRequest`** ([`src/lib/types.ts`](mdc:ajantic-v1/src/lib/types.ts)): Input for tool generation, now includes `acceptedStrategy?: StrategyAnalysis | null`.
+*   **`toolCreateRequestSchema`, `toolUpdateRequestSchema`** (API Routes): Zod schemas for frontend requests, now include `implementationType` and handle `acceptedStrategy`.
+*   **`refinedToolDefinitionSchema`** (Core Logic): Zod schema for AI output, now includes `implementationType`.
+*   **`ToolRegistryEntry`** ([`src/lib/agent-tools/tool-registry/ct-types.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-types.ts)): Represents stored tool, now includes `implementationType: string` and `acceptedStrategyJson?: string | null`. `requiredCredentialNames` is now an array of objects `{ name: string, label: string }[]`.
+*   **`apiImplementationConfigSchema`** ([`src/lib/agent-tools/tool-registry/ct-utils.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-utils.ts)): Zod schema for validating API configuration JSON.
 
-## Workflow Summary (Playground - Refactored)
+## Workflow Summary (Playground - Updated)
 
-1.  **(Optional) Quick Start & Refine Structure:** User interacts with specific UI sections and APIs ([`/api/playground/quick-start-tool`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/api/playground/quick-start-tool/route.ts), [`/api/playground/refine-tool-structure`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/api/playground/refine-tool-structure/route.ts)) to generate/refine a `ToolRequest` structure.
-2.  **Define/Load Tool:** User populates the main "Tool Definition & Implementation" form ([`page.tsx`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/playground/custom-tool/page.tsx)), potentially loading details from an existing tool. This populates UI state including structure and `implementation`.
-3.  **Generate/Regenerate Implementation:**
-    *   Button: "Generate/Regenerate Implementation"
-    *   Action: Sends current form state (`name`, `description`, `inputs`, `modificationRequests`, etc.), `modelArgs`, and *optionally* the current `implementation` (from UI state) to [`/api/playground/generate-tool-definition`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/api/playground/generate-tool-definition/route.ts).
-    *   Backend: Calls `CORE_generateCustomToolDefinition`. The prompt includes the existing `implementation` if provided, guiding the AI to modify it. Returns the full refined definition + implementation.
-    *   Result: Updates the UI form and displays the new implementation. **Does not save to the database.**
-4.  **Save as New Tool:**
-    *   Button: "Save as New Tool"
-    *   Action: Sends the current form state (`name`, `description`, `inputs`) *and* the current `implementation` (from UI state) to [`/api/playground/create-tool`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/api/playground/create-tool/route.ts).
-    *   Backend: **Directly** calls `ToolRegistry.registerTool` to save the provided definition and implementation as a new tool. **No regeneration occurs.**
-    *   Result: Creates a new tool record in the database. UI shows success/error.
-5.  **Save Updates to Selected Tool:**
-    *   Button: "Save Updates to Selected Tool"
-    *   Action: Sends the current form state (`name`, `description`, `inputs`) *and* the current `implementation` (from UI state), along with the `toolRef` of the selected tool, to [`/api/playground/update-tool`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/api/playground/update-tool/route.ts).
-    *   Backend: Performs ownership check, then **directly** calls `ToolRegistry.updateTool` to update the existing tool record with the provided definition and implementation. **No regeneration occurs.**
-    *   Result: Updates the existing tool record in the database. UI shows success/error.
-6.  **Execute Tool:**
-    *   Button: "Execute Tool"
-    *   Action: Sends `toolRef` and `toolArgs` to [`/api/playground/custom-tool`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/api/playground/custom-tool/route.ts) (POST).
-    *   Backend: Uses `ToolRegistry.getToolById` and `ToolFactory.buildTool` to load and execute the tool.
-    *   Result: Returns execution result or error to the UI.
+1.  **(Optional) Analyze Implementation Strategy:** User provides tool idea, system calls `/api/playground/analyze-implementation-strategy`. Returns `StrategyAnalysis` object (includes `recommendedType`, `requiredCredentialName`, etc.). This becomes `acceptedStrategy`.
+2.  **(Optional) Quick Start & Refine Structure:** Similar to before, generates a `ToolRequest` structure.
+3.  **Define/Load Tool:** User populates form, `acceptedStrategy` (if available) is associated.
+4.  **Generate/Regenerate Implementation:**
+    *   Action: Sends current form state, `modelArgs`, `acceptedStrategy` (if any), and current `implementation` (if any) to `/api/playground/generate-tool-definition`.
+    *   Backend: Calls `CORE_generateCustomToolDefinition`. AI uses `acceptedStrategy` to determine `implementationType` and generate corresponding `implementation`.
+    *   Result: Updates UI. **No DB save.**
+5.  **Save as New Tool:**
+    *   Action: Sends form state, `implementation`, `implementationType` (user can override AI suggestion or provide if not generated), and `acceptedStrategyJson` to `/api/playground/create-tool`.
+    *   Backend: Calls `ToolRegistry.registerTool`. `validateImplementationString` is used internally by `ToolFactory` if tools were to be built immediately, but for registration, the direct API route validates if `implementationType` is "api" and `implementation` is valid JSON.
+    *   Result: New tool in DB.
+6.  **Save Updates to Selected Tool:**
+    *   Action: Sends form state, `implementation`, `implementationType`, `acceptedStrategyJson`, and `toolRef` to `/api/playground/update-tool`.
+    *   Backend: Calls `ToolRegistry.updateTool`.
+    *   Result: Updates tool in DB.
+7.  **Execute Tool:**
+    *   Backend: `ToolFactory.buildTool` uses `implementationType` to correctly build and execute.
 
-## User Scoping & Agent Independence (Recent Refactoring)
+## User Scoping & Agent Independence
 
 The custom tool system has been refactored to be **user-scoped** rather than agent-specific. Key points:
 
-*   **Ownership:** Custom tools are owned by users, identified by the top-level `userId` field in the `CustomTool` database model and the [`ToolRegistryEntry`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/tool-registry/ct-types.ts) interface.
-*   **Agent ID Removed:** The previous dependency on an `agentId` (referencing the `AgentComponent` database ID) stored in metadata has been removed from core logic ([`ct-actions.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/tool-registry/ct-actions.ts), [`auto-gen-tool_core.ts`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts)). Functions like `getToolsForAgent` were removed or refactored.
+*   **Ownership:** Custom tools are owned by users, identified by the top-level `userId` field in the `CustomTool` database model and the [`ToolRegistryEntry`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-types.ts) interface.
+*   **Agent ID Removed:** The previous dependency on an `agentId` (referencing the `AgentComponent` database ID) stored in metadata has been removed from core logic ([`ct-actions.ts`](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-actions.ts), [`auto-gen-tool_core.ts`](mdc:ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts)). Functions like `getToolsForAgent` were removed or refactored.
 *   **User Identification:** Agents are identified by `name` (unique per user), not database `id`, as per design choice.
-*   **API Requirement:** Playground API routes (`/api/playground/*`) now generally require the `userId` (obtained from Zustand store `useAnalysisStore`'s `localState` in [`page.tsx`](mdc:ajantic-v1/ajantic-v1/ajantic-v1/ajantic-v1/src/app/playground/custom-tool/page.tsx)) to be passed in requests (query params or body) for filtering and authorization.
+*   **API Requirement:** Playground API routes (`/api/playground/*`) now generally require the `userId` (obtained from Zustand store `useAnalysisStore`'s `localState` in [`page.tsx`](mdc:ajantic-v1/src/app/playground/custom-tool/page.tsx)) to be passed in requests (query params or body) for filtering and authorization.
 *   **Global Availability (Per User):** Any tool created by a user is available to any agent operated by that same user, simplifying management and reuse.
+
+## Potential Issues & Watchpoints
+
+*   **`implementationType` vs `implementation` Mismatch:** Ensure validation (e.g., `validateImplementationString`) effectively catches cases where `implementationType` is "api" but `implementation` is not valid JSON, or vice-versa.
+*   **Defaulting for Legacy Tools:** When `ToolFactory` loads a tool from DB that lacks `implementationType` (older tool), it needs a safe default (e.g., assume "function" or handle as an error if strictness is preferred). The current factory logic might error; this behavior should be confirmed or adjusted.
+*   **UI for API Config:** The Playground UI for directly editing an "api" type tool's `implementation` (which is JSON) might be error-prone if it's just a raw text area. Consider a structured editor or form fields for API configuration details if `implementationType` is `api`.
+
+This rule provides an updated overview of the custom tool system, incorporating the new `implementationType` and `acceptedStrategy` flows.
 
 
 

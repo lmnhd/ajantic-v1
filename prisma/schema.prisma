@@ -261,6 +261,7 @@ model CustomTool {
   parameters         String   // JSON string
   implementation     String   // Code or endpoint or JSON like {"endpoint": "..."}
   implementationType String   @default("function")
+  acceptedStrategyJson String?  // JSON string for the accepted strategy analysis
   metadata           String   // JSON string
   version            Int      @default(1)
   createdAt          DateTime @default(now())

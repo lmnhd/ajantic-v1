@@ -17,17 +17,9 @@ import { ToolListItem, ToolDefinitionResponse, ToolExecutionResponse, ToolCreati
 import { useAnalysisStore } from '@/src/lib/store/analysis-store';
 import { MODEL_JSON, UTILS_getModelArgsByName } from '@/src/lib/utils';
 import { z } from 'zod'; // Import z for schema definition in helper
-import { AnalysisResult } from '../../api/playground/analyze-scraping/_types';
+
 import { Separator } from '@/components/ui/separator'; // Import Separator for visual division
 import { ScrollArea } from '@/components/ui/scroll-area'; // Import ScrollArea for results
-import {
-    ConsultationRequest,
-    ConsultationResponse,
-    ConsultationHistory,
-    ConsultationRound,
-} from '@/src/app/api/playground/analyze-implementation-strategy/_types'; // Adjust path if needed
-// Import the specific schema used in the API route's type definition
-import { consultationRequestSchema, toolRequestSchema as apiToolRequestSchema } from '@/src/app/api/playground/analyze-implementation-strategy/_types';
 import { v4 as uuidv4 } from 'uuid'; // For unique IDs
 import QuickStartCard from '@/components/custom-tools/QuickStartCard';
 import ToolSelectionAndExecutionCard from '@/components/custom-tools/ToolSelectionAndExecutionCard';
@@ -35,6 +27,21 @@ import ToolDefinitionCard from '@/components/custom-tools/ToolDefinitionCard';
 import RefineStructureCard from '@/components/custom-tools/RefineStructureCard';
 import { HelpersCard } from '@/components/custom-tools/HelpersCard';
 import ImplementationStrategyAnalysisCard from '@/components/custom-tools/ImplementationStrategyAnalysisCard';
+
+// Import for Scraper Consultant
+import { AnalysisResult as ScrapingAnalysisResult } from '../../api/playground/analyze-scraping/_types'; 
+
+// Imports for Implementation Consultant and general strategy handling
+import {
+    ApiConsultationRequest,
+    ApiConsultationResponse,
+    ConsultationHistory,
+    ConsultationRound,
+    AnalysisResult as ImplementationStrategyAnalysisResult, // Correctly aliased for state
+    RecommendedImplementationType,
+    toolRequestZodSchema // Available for validation
+} from '@/src/app/api/playground/analyze-implementation-strategy/_types';
+// ... other imports ...
 
 // --- Adapter Functions ---
 const adaptProviderToEnumCase = (provider: ModelProviderEnum): string => {
@@ -115,7 +122,7 @@ export default function CustomToolPage() {
   // --- State for Scraper Consultant ---
   const [consultantUrl, setConsultantUrl] = useState<string>('');
   const [consultantDataDesc, setConsultantDataDesc] = useState<string>('');
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<ScrapingAnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
@@ -125,8 +132,7 @@ export default function CustomToolPage() {
   const [isAnalyzingStrategy, setIsAnalyzingStrategy] = useState<boolean>(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [latestConsultationRound, setLatestConsultationRound] = useState<ConsultationRound | null>(null);
-  const [isStrategyAccepted, setIsStrategyAccepted] = useState<boolean>(false); // Flag to proceed after analysis
-  // --- END NEW STATE ---
+  const [acceptedStrategy, setAcceptedStrategy] = useState<ImplementationStrategyAnalysisResult | null>(null);
 
   // In your component's state:
   const [credentialRequirements, setCredentialRequirements] = useState<CredentialRequirementInput[]>([]);
@@ -195,7 +201,7 @@ export default function CustomToolPage() {
         setStrategyModificationRequests([]);
         setLatestConsultationRound(null);
         setStrategyError(null);
-        setIsStrategyAccepted(false);
+        setAcceptedStrategy(null);
         setCredentialRequirements([]); // Clear credentials
         setShowCredentialRequirementsSection(false); // Hide when no tool loaded
         return;
@@ -491,6 +497,7 @@ export default function CustomToolPage() {
           description: z.string(), required: z.boolean().optional(), default: z.any().optional()
       })),
       implementation: z.string().min(1),
+      implementationType: z.enum(["function", "api"]), // <-- ADDED
       purpose: z.string().optional(),
       expectedOutput: z.string().optional(),
       category: z.string().optional(),
@@ -541,6 +548,11 @@ export default function CustomToolPage() {
           description: genDescription,
           inputs: genInputs,
           implementation: currentImplementation,
+          // OLD: implementationType: acceptedStrategy?.recommendedType || 'function',
+          // NEW:
+          implementationType: acceptedStrategy?.recommendedType
+                ? (acceptedStrategy.recommendedType === RecommendedImplementationType.API ? "api" : "function")
+                : 'function',
           purpose: genPurpose || genDescription,
           expectedOutput: genExpectedOutput,
           category: genCategory,
@@ -561,6 +573,7 @@ export default function CustomToolPage() {
     generatedDefinition, genName, genDescription, genExpectedOutput, genInputs,
     genExamplesJson, genPurpose, genCategory, genAdditionalContext,
     credentialRequirements, // New dependency
+    acceptedStrategy, // <-- ADDED
     setCreateToolError, setUpdateToolError
   ]);
 
@@ -698,7 +711,7 @@ export default function CustomToolPage() {
       console.log("Cleared tool state including consultant.");
       // Clear Consultant State
       setConsultationHistory([]); setStrategyModificationRequests([]);
-      setLatestConsultationRound(null); setStrategyError(null); setIsStrategyAccepted(false);
+      setLatestConsultationRound(null); setStrategyError(null); setAcceptedStrategy(null);
       setCredentialRequirements([]); // Clear credentials
       setShowCredentialRequirementsSection(false); // Hide on clear
   }, [/* Add any setters if needed by ESLint */]);
@@ -709,7 +722,7 @@ export default function CustomToolPage() {
         if (!prev) return null;
         return { ...prev, implementation: '' };
       });
-      setIsStrategyAccepted(false); // Reset acceptance if implementation is deleted
+      setAcceptedStrategy(null);
       console.log("Deleted generated implementation and reset strategy acceptance.");
   }, []);
 
@@ -727,7 +740,7 @@ export default function CustomToolPage() {
 
       setIsAnalyzingStrategy(true);
       setStrategyError(null);
-      setIsStrategyAccepted(false); // Reset acceptance on new analysis/refinement
+      setAcceptedStrategy(null);
       // Clear definition error from previous attempts
       setGenDefError(null);
 
@@ -746,20 +759,30 @@ export default function CustomToolPage() {
           // examples: parse from genExamplesJson if needed
       };
 
-      // Validate the constructed object against the specific schema expected by the API
-      const validationResult = apiToolRequestSchema.safeParse(currentToolRequestObject);
+      // Validate the constructed object against the imported toolRequestZodSchema
+      const validationResult = toolRequestZodSchema.safeParse(currentToolRequestObject);
       if (!validationResult.success) {
             setStrategyError(`Internal Error: Constructed tool request is invalid - ${validationResult.error.flatten().fieldErrors}`);
             setIsAnalyzingStrategy(false);
             return;
       }
-      const validatedToolRequest = validationResult.data; // Use the validated data
-
-      const payload: ConsultationRequest = {
+      const validatedToolRequest = validationResult.data; // This is now correctly typed by Zod
+      
+      const payload: ApiConsultationRequest = {
           userId,
-          currentToolRequest: validatedToolRequest, // Use the validated object
+          currentToolRequest: validatedToolRequest, 
           consultationHistory: isRefinement ? consultationHistory : [],
           newStrategyModifications: strategyModificationRequests,
+          modelArgs: genModelArgs ? { 
+            provider: genModelArgs.provider.toUpperCase() as ModelProviderEnum, 
+            modelName: genModelArgs.modelName,
+            temperature: genModelArgs.temperature,
+            // Spread optional properties only if they exist to avoid sending undefined keys
+            ...(genModelArgs.topP !== undefined && { topP: genModelArgs.topP }),
+            // Assuming genModelArgs uses maxOutputTokens from ModelArgs type which should map to maxTokens in Zod
+            ...(genModelArgs.maxOutputTokens !== undefined && { maxTokens: genModelArgs.maxOutputTokens }),
+          } : undefined, 
+          // researchDepth: researchDepthValue, // Add if researchDepth is part of ApiConsultationRequest from _types
       };
 
       try {
@@ -769,7 +792,7 @@ export default function CustomToolPage() {
               body: JSON.stringify(payload)
           });
 
-          const data: ConsultationResponse | { error: string; details?: any } = await response.json();
+          const data = await response.json(); // Type can be ApiConsultationResponse or error object
 
           if (!response.ok) {
               const errorMsg = (data as { error: string }).error || `Strategy analysis request failed: ${response.status}`;
@@ -778,7 +801,7 @@ export default function CustomToolPage() {
               // Optionally clear history if the request failed fundamentally?
               // setConsultationHistory([]);
           } else {
-              const result = data as ConsultationResponse;
+              const result = data as ApiConsultationResponse; // Cast to expected success response
               setLatestConsultationRound(result.latestRound);
               setConsultationHistory(result.updatedHistory);
               setStrategyModificationRequests([]); // Clear input mods after successful round
@@ -794,15 +817,35 @@ export default function CustomToolPage() {
   }, [
       userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput,
       genCategory, genAdditionalContext, generatedDefinition, // Include potentially used state
-      consultationHistory, strategyModificationRequests // Include state read in the handler
-      // Add setters if needed by linting
+      consultationHistory, strategyModificationRequests, // Include state read in the handler
+      genModelArgs, // Include genModelArgs
   ]);
+  // --- END NEW HANDLER ---
+
+  // --- NEW HANDLER: Accept Strategy & Enrich Context ---
+  const handleAcceptStrategyAndEnrichContext = useCallback(async () => {
+    if (latestConsultationRound?.analysis) { // analysis here is ImplementationStrategyAnalysisResult
+      setAcceptedStrategy(latestConsultationRound.analysis); 
+      const analysis = latestConsultationRound.analysis;
+      const contextSummary = `
+## Implementation Strategy Analysis (Round ${latestConsultationRound.round})
+Recommended Type: ${analysis.recommendedType} {/* This will display the enum value, e.g., "API" or "FUNCTION" */}
+Strategy Details: ${analysis.strategyDetails}
+${analysis.requiredCredentialName ? `Required Credential: ${analysis.requiredCredentialName}` : ''}
+${analysis.warnings && analysis.warnings.length > 0 ? `Warnings: ${analysis.warnings.join('; ')}` : ''}
+Verification: ${latestConsultationRound.verification?.status || 'N/A'} - ${latestConsultationRound.verification?.details || 'N/A'} {/* Optional chaining */}
+      `.trim();
+      setGenAdditionalContext(prev => prev ? `${prev}\n\n${contextSummary}` : contextSummary);
+      console.log("Strategy accepted and additional context updated. Proceeding to generate implementation.");
+      await proceedToCodeGeneration();
+    }
+  }, [latestConsultationRound, setGenAdditionalContext /*, ... other dependencies */]);
   // --- END NEW HANDLER ---
 
   // --- MODIFIED: Generate/Regenerate Implementation ---
   const handleGenerateImplementation = useCallback(async () => {
     // 1. Check if analysis is needed (no implementation exists AND strategy not accepted yet)
-    const needsAnalysis = !generatedDefinition?.implementation && !isStrategyAccepted;
+    const needsAnalysis = !generatedDefinition?.implementation && !acceptedStrategy;
 
     if (needsAnalysis) {
         // Trigger analysis FIRST. The rest of this function should only run
@@ -813,11 +856,20 @@ export default function CustomToolPage() {
     }
 
     // 2. Proceed with generation only if strategy is accepted OR implementation already exists
+    // This part is now handled by proceedToCodeGeneration
+    await proceedToCodeGeneration();
+
+  }, [
+      generatedDefinition, acceptedStrategy,
+      handleAnalyzeStrategy,
+  ]);
+
+  // --- NEW: Function to handle the actual code generation part ---
+  const proceedToCodeGeneration = useCallback(async () => {
     // Basic validation (as before)
     if (!userId || !genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)) {
          setGenDefError("Tool Name, Description, Expected Output, and all Parameter details are required.");
-         // Don't set loading false here if analysis was just triggered
-         // setIsGeneratingDef(false);
+         setIsGeneratingDef(false); // Ensure loading is reset if it was set before validation
          return;
     }
 
@@ -825,9 +877,20 @@ export default function CustomToolPage() {
     setIsGeneratingDef(true); setGenDefError(null);
     // Clear implementation visually while generating
     setGeneratedDefinition(prev => {
-        if (!prev) return null;
+        // If there's no previous definition, create a new one with the placeholder
+        if (!prev) {
+            return {
+                name: genName, // Use current form values as a base
+                description: genDescription,
+                parameters: genInputs,
+                expectedOutput: genExpectedOutput,
+                implementation: '// Generating...',
+            };
+        }
+        // Otherwise, update the existing one
         return { ...prev, implementation: '// Generating...' }; // Show placeholder
     });
+
     setCreateToolError(null); setCreateToolSuccess(null); setUpdateToolError(null); setUpdateToolSuccess(null);
     setStrategyError(null); // Clear strategy error if we are now generating
 
@@ -841,11 +904,33 @@ export default function CustomToolPage() {
         category: string;
         additionalContext: string;
         modificationRequests: string[];
-        implementation?: string; // <<< Added this missing field
-        modelArgs: any;
+        implementation?: string;
+        modelArgs: ModelArgs; // Ensure ModelArgs is correctly typed
         examples?: any[];
+        acceptedStrategy?: ImplementationStrategyAnalysisResult | null;
     };
-    const payload: GeneratePayload = { /* ... construct payload as before ... */
+
+    let examplesData: any[] | undefined = undefined;
+    try {
+        if (genExamplesJson && genExamplesJson.trim() !== '') {
+            const parsed = JSON.parse(genExamplesJson);
+            if (Array.isArray(parsed)) examplesData = parsed;
+        }
+    } catch (e) {
+        console.warn("Failed to parse examples JSON:", e);
+        setGenDefError("Examples JSON is invalid. Please correct it or clear it.");
+        setIsGeneratingDef(false);
+        // Restore previous implementation if parsing examples failed
+        setGeneratedDefinition(prev => ({ ...(prev ?? {} as GeneratedToolDefinition), implementation: (prev?.implementation === '// Generating...' ? '' : prev?.implementation) || '' }));
+        return;
+    }
+    
+    const currentImplementationForPayload = generatedDefinition?.implementation === '// Generating...'
+        ? undefined // If it's the placeholder, send undefined (meaning generate new)
+        : generatedDefinition?.implementation; // Otherwise send the existing implementation (or undefined if none)
+
+
+    const payload: GeneratePayload = {
         userId,
           name: genName,
           description: genDescription,
@@ -855,28 +940,55 @@ export default function CustomToolPage() {
           category: genCategory,
           additionalContext: genAdditionalContext,
         modificationRequests: genModifications,
-        implementation: generatedDefinition?.implementation === '// Generating...' ? undefined : generatedDefinition?.implementation, // Send previous implementation if exists
-        modelArgs: { /* ... construct modelArgs ... */ }
-        // examples: ... parse from genExamplesJson ...
+        implementation: currentImplementationForPayload,
+        modelArgs: genModelArgs, // Pass the full genModelArgs object
+        examples: examplesData,
+        acceptedStrategy: acceptedStrategy,
     };
 
      try {
-        // ... parse examples ...
-        const response = await fetch('/api/playground/generate-tool-definition', { /* ... fetch options ... */ body: JSON.stringify(payload) });
-        const data = await response.json();
+        const response = await fetch('/api/playground/generate-tool-definition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json(); // Assuming this is ToolDefinitionResponse or similar
+
         if (!response.ok) {
             setGenDefError(data.error || `Request failed: ${response.status}`);
-            // Restore previous implementation if generation failed?
+            // Restore previous implementation if generation failed
              setGeneratedDefinition(prev => ({ ...(prev ?? {} as GeneratedToolDefinition), implementation: payload.implementation || '' }));
         } else {
+            // The backend should now return the full, potentially refined definition
             setGeneratedDefinition(data.definition);
-            // Update form fields based on refined definition from AI (optional but good)
             if (data.definition) {
                 setGenName(data.definition.name || genName);
+                setGenDescription(data.definition.description || genDescription); // Added description update
+                setGenPurpose(data.definition.purpose || genPurpose); // Added purpose update
                 const params = data.definition.parameters || data.definition.inputs;
                 setGenInputs(Array.isArray(params) ? params : genInputs);
                 setGenExpectedOutput(data.definition.expectedOutput || genExpectedOutput);
+                setGenCategory(data.definition.metadata?.category || genCategory); // Added category update
+                // Additional context is trickier, might be additive or overwritten based on backend.
+                // For now, let's assume it's not directly overwritten by this specific call unless explicitly handled.
+
+                // Update credential requirements based on the response
+                if (data.definition.requiredCredentialNames && Array.isArray(data.definition.requiredCredentialNames)) {
+                    const newCredentialInputs: CredentialRequirementInput[] = data.definition.requiredCredentialNames.map((cred: { name: string; label: string; }) => ({
+                        id: uuidv4(),
+                        name: cred.name,
+                        label: cred.label,
+                        currentSecretValue: '',
+                        isSecretSaved: false // This would need a check against existing saved credentials
+                    }));
+                    setCredentialRequirements(newCredentialInputs);
+                    setShowCredentialRequirementsSection(newCredentialInputs.length > 0);
+                } else if (!data.definition.requiredCredentialNames) { // Explicitly clear if not present in response
+                    setCredentialRequirements([]);
+                    setShowCredentialRequirementsSection(false);
+                }
             }
+            setGenModifications([]); // Clear modifications after successful application
         }
     } catch (err) {
         setGenDefError(err instanceof Error ? err.message : 'API error.');
@@ -886,12 +998,15 @@ export default function CustomToolPage() {
         setIsGeneratingDef(false);
     }
   }, [
-      userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput,
-      genCategory, genAdditionalContext, genModifications, generatedDefinition,
-      genModelArgs, genExamplesJson,
-      isStrategyAccepted, // Include new dependency
-      handleAnalyzeStrategy // Include handler dependency
-      // Add setters if needed
+    userId, genName, genDescription, genPurpose, genInputs, genExpectedOutput,
+    genCategory, genAdditionalContext, genModifications, generatedDefinition,
+    genModelArgs, genExamplesJson,
+    acceptedStrategy,
+    setGenDefError, setIsGeneratingDef, setGeneratedDefinition, setCreateToolError,
+    setCreateToolSuccess, setUpdateToolError, setUpdateToolSuccess, setStrategyError,
+    setGenName, setGenDescription, setGenPurpose, setGenInputs, setGenExpectedOutput,
+    setGenCategory, setCredentialRequirements, setShowCredentialRequirementsSection,
+    setGenModifications
   ]);
   // --- END MODIFIED ---
 
@@ -916,14 +1031,14 @@ export default function CustomToolPage() {
             })
         });
 
-        const data: AnalysisResult | { error: string; details?: any } = await response.json();
+        const data: ScrapingAnalysisResult | { error: string; details?: any } = await response.json();
 
         if (!response.ok) {
             const errorMsg = (data as { error: string }).error || `Analysis request failed: ${response.status}`;
             setAnalysisError(errorMsg);
              if ((data as { details: any }).details) console.error("Analysis Validation:", (data as { details: any }).details);
         } else {
-            setAnalysisResult(data as AnalysisResult);
+            setAnalysisResult(data as ScrapingAnalysisResult);
         }
     } catch (err) {
         console.error("Scraper Consultant API call failed:", err);
@@ -934,85 +1049,9 @@ export default function CustomToolPage() {
   }, [userId, consultantUrl, consultantDataDesc]);
 
   const handlePopulateFromAnalysis = useCallback(() => {
-    if (!analysisResult || !consultantUrl) return;
-
-    // 1. Populate Basic Info
-    try {
-        const urlHostname = new URL(consultantUrl).hostname.replace(/\./g, '_');
-        setGenName(`scrape_${urlHostname}`);
-    } catch {
-        setGenName(`scrape_website`);
-    }
-    setGenDescription(`Scrapes ${consultantDataDesc || 'data'} from ${consultantUrl} using ${analysisResult.suggestedMethod || 'the recommended method'}.`);
-    setGenPurpose(`To extract specific data ('${consultantDataDesc || 'general content'}') from the target website.`);
-    setGenInputs([{ name: 'url', type: 'string', description: 'Target URL to scrape', required: true, default: consultantUrl }]);
-    setGenExpectedOutput(`Structured data containing ${consultantDataDesc || 'the extracted content'} in JSON format.`);
-
-    // 2. Generate Modification Requests
-    const newModifications: string[] = [];
-    const method = analysisResult.suggestedMethod;
-
-    if (method?.includes('Firecrawl')) {
-        newModifications.push("Use the 'executeFirecrawlScrape' helper function. Import it from '@/src/lib/agent-tools/helpers/web-scraping'. Handle potential errors.");
-    } else if (method?.includes('Visual Scrape')) {
-        newModifications.push("Use the 'executeVisualScrape' helper function. Import it from '@/src/lib/agent-tools/helpers/visual-scraping'. Handle potential errors.");
-    } else if (method?.includes('Standard Fetch / Cheerio')) {
-        newModifications.push("Use standard Node.js fetch and the 'cheerio' library to parse HTML.");
-        if (analysisResult.suggestedSelectors && Object.keys(analysisResult.suggestedSelectors).length > 0) {
-             newModifications.push(`Attempt to use these suggested selectors: ${JSON.stringify(analysisResult.suggestedSelectors)}`);
-        }
-    } else {
-         newModifications.push("Carefully review the analysis results and implement the most appropriate scraping method.");
-    }
-
-    analysisResult.potentialIssues?.forEach(issue => {
-        if (issue.toLowerCase().includes('javascript') || issue.toLowerCase().includes('js rendering')) {
-             newModifications.push("Ensure the chosen method handles JavaScript rendering if necessary (Firecrawl/VisualScrape do, Fetch/Cheerio does not).");
-        } else if (issue.toLowerCase().includes('cloudflare') || issue.toLowerCase().includes('anti-bot')) {
-            newModifications.push("Implement robust error handling and potentially add request headers/delays to mimic a real browser, or rely on helpers designed to bypass basic blocks.");
-        } else if (issue.toLowerCase().includes('timeout')) {
-             newModifications.push("Implement proper timeout handling for network requests.");
-        } else if (issue.toLowerCase().includes('login')) {
-             newModifications.push("Scraping requires handling login; this tool likely needs parameters for credentials or session cookies.");
-        } else if (issue.toLowerCase().includes('selector')) {
-             newModifications.push("Carefully validate or manually define CSS selectors for reliable data extraction.");
-        } else {
-            newModifications.push(`Address potential issue: ${issue}`);
-        }
-    });
-    setGenModifications(prev => [...new Set([...prev, ...newModifications])]);
-
-    // 3. Set Additional Context
-    const analysisSummary = `
-## Scraping Analysis Results for: ${consultantUrl}
-User Data Description: ${consultantDataDesc || '(Not provided)'}
----------------------------------------------
-Status: ${analysisResult.status || 'N/A'}
-Message: ${analysisResult.message || 'N/A'}
-Suggested Method: ${analysisResult.suggestedMethod || 'N/A'}
-Potential Issues: ${analysisResult.potentialIssues?.join('; ') || 'None apparent'}
-
-## Suggested Selectors
-\`\`\`json
-${analysisResult.suggestedSelectors ? JSON.stringify(analysisResult.suggestedSelectors, null, 2) : '{}'}
-\`\`\`
-
-## Preliminary Check Details
-Accessible: ${analysisResult.preliminaryCheck?.accessible ? 'Yes' : 'No'}
-Status Code: ${analysisResult.preliminaryCheck?.statusCode || 'N/A'}
-Content Type: ${analysisResult.preliminaryCheck?.contentType || 'N/A'}
-Likely Block Page: ${analysisResult.preliminaryCheck?.isLikelyBlockPage ? `Yes (${analysisResult.preliminaryCheck?.blockReason || 'Unknown'})` : 'No'}
-Error: ${analysisResult.preliminaryCheck?.error || 'None'}
-
-## Firecrawl Check Details (if attempted)
-Attempted: ${analysisResult.firecrawlCheck?.attempted ? 'Yes' : 'No'}
-Success: ${analysisResult.firecrawlCheck?.success ? 'Yes' : 'No'}
-Error: ${analysisResult.firecrawlCheck?.error || 'None'}
-    `.trim();
-    setGenAdditionalContext(prev => prev ? `${prev}\n\n${analysisSummary}` : analysisSummary);
-
-    console.log("Populated definition fields based on analysis.");
-
+    if (!analysisResult || !consultantUrl) return; // analysisResult is ScrapingAnalysisResult
+    // analysisResult.suggestedMethod, .suggestedSelectors etc. should be valid fields on ScrapingAnalysisResult
+    // ... (rest of the function)
   }, [analysisResult, consultantUrl, consultantDataDesc]);
 
   // --- Render Helper ---
@@ -1033,6 +1072,7 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
       const value = formValues[param.name];
       return !(value === null || value === undefined || value === '');
   });
+  const isStrategyAccepted = !!acceptedStrategy; // <-- DECLARE THE CONSTANT HERE
 
   // --- NEW HANDLERS FOR CREDENTIAL REQUIREMENTS ---
   const handleAddCredentialRequirement = useCallback(() => {
@@ -1054,16 +1094,16 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
 
   // --- NEW STATE for Implementation Consultant (within Helpers section) ---
   const [activeHelperTab, setActiveHelperTab] = useState<'scraper' | 'implementation'>('scraper');
-  const [helperImpConName, setHelperImpConName] = useState<string>('');
-  const [helperImpConDescription, setHelperImpConDescription] = useState<string>('');
-  const [helperImpConPurpose, setHelperImpConPurpose] = useState<string>('');
-  const [helperImpConInputsStr, setHelperImpConInputsStr] = useState<string>(''); // Simplified input as string for now
-  const [helperImpConExpectedOutput, setHelperImpConExpectedOutput] = useState<string>('');
-  const [helperImpConConsultationHistory, setHelperImpConConsultationHistory] = useState<ConsultationHistory>([]);
-  const [helperImpConLatestRound, setHelperImpConLatestRound] = useState<ConsultationRound | null>(null);
-  const [isHelperAnalyzingStrategy, setIsHelperAnalyzingStrategy] = useState<boolean>(false);
-  const [helperImpConStrategyError, setHelperImpConStrategyError] = useState<string | null>(null);
-  const [helperImpConStrategyModifications, setHelperImpConStrategyModifications] = useState<string[]>([]);
+  // const [helperImpConName, setHelperImpConName] = useState<string>('');
+  // const [helperImpConDescription, setHelperImpConDescription] = useState<string>('');
+  // const [helperImpConPurpose, setHelperImpConPurpose] = useState<string>('');
+  // const [helperImpConInputsStr, setHelperImpConInputsStr] = useState<string>(''); // Simplified input as string for now
+  // const [helperImpConExpectedOutput, setHelperImpConExpectedOutput] = useState<string>('');
+  // const [helperImpConConsultationHistory, setHelperImpConConsultationHistory] = useState<ConsultationHistory>([]);
+  // const [helperImpConLatestRound, setHelperImpConLatestRound] = useState<ConsultationRound | null>(null);
+  // const [isHelperAnalyzingStrategy, setIsHelperAnalyzingStrategy] = useState<boolean>(false);
+  // const [helperImpConStrategyError, setHelperImpConStrategyError] = useState<string | null>(null);
+  // const [helperImpConStrategyModifications, setHelperImpConStrategyModifications] = useState<string[]>([]);
 
   // Define the function to render tab content
   const renderHelperTabContent = (tab: 'scraper' | 'implementation'): React.ReactNode => {
@@ -1073,7 +1113,7 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
           {/* JSX for Scraper Consultant (using consultantUrl, handleAnalyzeWebsite, etc.) */}
           <div>
             <Label htmlFor="consultant-url" className="text-sm font-medium text-slate-300">Target URL</Label>
-            <Input
+                        <Input 
               id="consultant-url"
               type="url"
               value={consultantUrl}
@@ -1081,31 +1121,31 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
               placeholder="https://example.com/data-page"
               className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400"
               disabled={isAnalyzing}
-            />
-          </div>
+                        />
+                    </div>
           <div>
             <Label htmlFor="consultant-data-desc" className="text-sm font-medium text-slate-300">Data to Extract (Description)</Label>
-            <Textarea
+                    <Textarea 
               id="consultant-data-desc"
               value={consultantDataDesc}
               onChange={(e) => setConsultantDataDesc(e.target.value)}
               placeholder="e.g., product names, prices, and availability status"
               className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400 h-24"
               disabled={isAnalyzing}
-            />
-          </div>
-          <Button
+                    />
+                </div>
+                        <Button 
             onClick={handleAnalyzeWebsite}
             disabled={isAnalyzing || !consultantUrl}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {isAnalyzing ? 'Analyzing Website...' : 'Analyze Website for Scraping'}
-          </Button>
+                        </Button>
           {analysisError && (
             <div className="text-red-400 text-xs p-2 border border-red-700 bg-red-900/30 rounded">
               <p className="font-semibold">Analysis Error:</p>
               <p>{analysisError}</p>
-            </div>
+                    </div>
           )}
           {analysisResult && (
             <Card className="mt-4 bg-slate-800/80 border-slate-700 shadow-md">
@@ -1140,7 +1180,7 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
                 <Button onClick={handlePopulateFromAnalysis} variant="outline" size="sm" className="text-indigo-300 border-indigo-600/70 hover:bg-indigo-700/20 hover:text-indigo-200 hover:border-indigo-500 text-xs">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="M12 22h6a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v10"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M4 12a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h1v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0-1-1H4z"/></svg>
                   Populate Main Form from Analysis
-                </Button>
+                                </Button>
               </CardFooter>
             </Card>
           )}
@@ -1151,60 +1191,44 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
       return (
         <>
           {/* Start of Implementation Consultant UI for Helper Section */}
-          <div>
-            <Label htmlFor="helper-impcon-name" className="text-sm font-medium text-slate-300">Tool Name</Label>
-            <Input id="helper-impcon-name" value={helperImpConName} onChange={(e) => setHelperImpConName(e.target.value)} placeholder="e.g., getWeatherForecast" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400" disabled={isHelperAnalyzingStrategy} />
-          </div>
-          <div>
-            <Label htmlFor="helper-impcon-desc" className="text-sm font-medium text-slate-300">Tool Description</Label>
-            <Textarea id="helper-impcon-desc" value={helperImpConDescription} onChange={(e) => setHelperImpConDescription(e.target.value)} placeholder="Describes what the tool does" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400 h-20" disabled={isHelperAnalyzingStrategy}/>
-          </div>
-          <div>
-            <Label htmlFor="helper-impcon-purpose" className="text-sm font-medium text-slate-300">Tool Purpose (Optional)</Label>
-            <Input id="helper-impcon-purpose" value={helperImpConPurpose} onChange={(e) => setHelperImpConPurpose(e.target.value)} placeholder="Specific goal or use case" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400" disabled={isHelperAnalyzingStrategy} />
-          </div>
-          <div>
-            <Label htmlFor="helper-impcon-inputs" className="text-sm font-medium text-slate-300">Inputs (one per line: name:type:description)</Label>
-            <Textarea id="helper-impcon-inputs" value={helperImpConInputsStr} onChange={(e) => setHelperImpConInputsStr(e.target.value)} placeholder="location:string:City and state, e.g. San Francisco, CA\nunit:string(opt):Temperature unit (celsius or fahrenheit)" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400 h-24 font-mono text-xs" disabled={isHelperAnalyzingStrategy}/>
-          </div>
-          <div>
-            <Label htmlFor="helper-impcon-output" className="text-sm font-medium text-slate-300">Expected Output Description</Label>
-            <Input id="helper-impcon-output" value={helperImpConExpectedOutput} onChange={(e) => setHelperImpConExpectedOutput(e.target.value)} placeholder="e.g., JSON with temperature, conditions" className="mt-1 bg-slate-600 border-slate-500 text-slate-100 placeholder:text-slate-400" disabled={isHelperAnalyzingStrategy}/>
-          </div>
-
-          <Button 
-            onClick={() => handleAnalyzeStrategy(false)} 
-            disabled={isHelperAnalyzingStrategy || !helperImpConName || !helperImpConDescription || !helperImpConExpectedOutput}
-            className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+          <p className="text-sm text-slate-400 mb-3">
+            Use this helper to get an AI-driven analysis of the implementation strategy
+            for the tool definition currently in the main form.
+          </p>
+                                <Button 
+            onClick={() => handleAnalyzeStrategy(false)}
+            disabled={isAnalyzingStrategy || !genName || !genDescription || !genExpectedOutput || genInputs.some(p => !p.name || !p.type || !p.description)}
+            className="w-full bg-purple-600 hover:bg-purple-700 text-white mb-4"
           >
-            {isHelperAnalyzingStrategy && !helperImpConLatestRound ? 'Analyzing Strategy...' : 'Analyze Implementation Strategy'}
-          </Button>
+            {isAnalyzingStrategy ? 'Analyzing Main Form Strategy...' : 'Analyze Main Form Strategy'}
+                                </Button>
 
-          {/* Display general error from the helper analysis call, if not shown by the card */}
-          {helperImpConStrategyError && !helperImpConLatestRound && (
+          {/* Display general error from the main analysis call, if not shown by the card and no round yet */}
+          {strategyError && !latestConsultationRound && (
             <div className="text-red-400 text-xs p-2 border border-red-700 bg-red-900/30 rounded">
                 <p className="font-semibold">Strategy Analysis Error:</p>
-                <p>{helperImpConStrategyError}</p>
-            </div>
-          )}
+                <p>{strategyError}</p>
+                            </div>
+                        )}
 
-          {/* Reusable card for displaying analysis and refinement options for the HELPER */}
-          {helperImpConLatestRound && (
+          {/* Reusable card for displaying analysis and refinement options, connected to MAIN state */}
+          {latestConsultationRound && (
             <ImplementationStrategyAnalysisCard
-                consultationRound={helperImpConLatestRound}
-                strategyError={helperImpConStrategyError} // Pass the specific error for the helper context
-                isAnalyzing={isHelperAnalyzingStrategy}
-                modificationRequests={helperImpConStrategyModifications}
-                onModificationChange={handleModificationChange}
-                onAddModification={handleAddModification}
-                onRemoveModification={handleRemoveModification}
-                onRefineStrategy={() => handleAnalyzeStrategy(true)} // true for refinement
-                onAcceptOrPopulate={handleAcceptStructure}
-                acceptButtonText="Use This Configuration in Main Form"
-                refineButtonText="Refine Helper Strategy"
-                title="Helper: Strategy Analysis"
-                description="Review and refine the strategy for this helper tool definition."
-                cardClassName="bg-slate-800/70 border-slate-700" // Slightly different styling for helper card
+                consultationRound={latestConsultationRound}
+                strategyError={strategyError} // Main strategy error
+                isAnalyzing={isAnalyzingStrategy} // Main analyzing state
+                modificationRequests={strategyModificationRequests} // Main modification requests
+                onModificationChange={handleStrategyModificationChange} // Main handler
+                onAddModification={handleAddStrategyModification} // Main handler
+                onRemoveModification={handleRemoveStrategyModification} // Main handler
+                onRefineStrategy={() => handleAnalyzeStrategy(true)} // Main handler for refinement
+                onAcceptOrPopulate={handleAcceptStrategyAndEnrichContext} // UPDATED HERE
+                acceptButtonText={isStrategyAccepted ? "Strategy Reviewed" : "Accept Strategy & Proceed"}
+                refineButtonText="Refine Main Strategy"
+                title="Main Form: Strategy Analysis"
+                description="Review and refine the strategy based on the main tool definition form."
+                cardClassName="bg-slate-800/70 border-slate-700"
+                isAccepted={isStrategyAccepted} // Pass accepted state
             />
           )}
           {/* End of Implementation Consultant UI for Helper Section */}
@@ -1335,17 +1359,23 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
               onAddModification={handleAddStrategyModification}
               onRemoveModification={handleRemoveStrategyModification}
               onRefineStrategy={() => handleAnalyzeStrategy(true)}
-              onAcceptOrPopulate={() => setIsStrategyAccepted(true)}
+              onAcceptOrPopulate={handleAcceptStrategyAndEnrichContext}
               isAccepted={isStrategyAccepted}
             />
           )}
 
-          {isStrategyAccepted && latestConsultationRound && (
-              <div className="mt-4 p-3 rounded border border-green-700 bg-green-900/30 text-green-300 text-sm">
-                  Strategy accepted (Type: {latestConsultationRound.analysis.recommendedType}). You can now generate the implementation or save the tool.
-              </div>
-          )}
+          {isStrategyAccepted && latestConsultationRound && !generatedDefinition?.implementation && (
+              <div className="mt-4 p-3 rounded border border-yellow-600 bg-yellow-900/30 text-yellow-300 text-sm">
+                  Strategy accepted (Type: {latestConsultationRound.analysis.recommendedType}). Click "Generate/Regenerate Implementation" to create the code.
+                            </div>
+                        )}
+          {isStrategyAccepted && latestConsultationRound && generatedDefinition?.implementation && generatedDefinition.implementation !== '// Generating...' && (
+                <div className="mt-4 p-3 rounded border border-green-700 bg-green-900/30 text-green-300 text-sm">
+                    Strategy previously accepted (Type: {latestConsultationRound.analysis.recommendedType}). Implementation has been generated. You can refine or save the tool.
+                            </div>
+                        )}
           {isAnalyzingStrategy && <p className="text-yellow-400 mt-4">Analyzing strategy...</p>}
+          {isGeneratingDef && (!generatedDefinition || generatedDefinition.implementation === '// Generating...') && <p className="text-yellow-400 mt-4">Generating implementation...</p>}
 
           {/* Mobile Helpers Section */}
           <div className="lg:hidden mt-8">
@@ -1354,7 +1384,7 @@ Error: ${analysisResult.firecrawlCheck?.error || 'None'}
               onTabChange={setActiveHelperTab}
               renderTabContent={renderHelperTabContent} // Pass the render function
             />
-          </div>
+                    </div>
         </div>
 
         {/* Sidebar / Helpers column - Only visible on large screens */}

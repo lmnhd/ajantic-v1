@@ -1,5 +1,5 @@
 ---
-description: 
+description: Agent tools Custom tools
 globs: 
 alwaysApply: false
 ---
@@ -11,91 +11,106 @@ This document outlines the architecture and workflow for creating, configuring, 
 
 The custom tool implementation process involves several key stages:
 
-1.  **Tool Definition (Playground):** Users define the tool's purpose, parameters, and expected output via the Custom Tool Playground UI (`[src/app/playground/custom-tool/page.tsx](mdc:src/app/playground/custom-tool/page.tsx)`).
-2.  **Implementation Strategy Analysis (Optional but Recommended):** An "Implementation Consultant" service analyzes the tool request to recommend the best implementation method (API vs. function/code) and identify potential credential requirements.
-3.  **Credential Provisioning:** Users provide necessary secrets (e.g., API keys) either proactively during tool definition in the Playground or dynamically at runtime when an agent first attempts to use a tool requiring a missing, declared credential.
-4.  **Tool Execution:** Agents utilize loaded tools during orchestration. The system ensures necessary credentials are fetched and made available.
+1.  **Tool Definition (Playground):** Users define the tool's purpose, parameters, and expected output via the Custom Tool Playground UI (`[src/app/playground/custom-tool/page.tsx](mdc:ajantic-v1/src/app/playground/custom-tool/page.tsx)`).
+2.  **Implementation Strategy Analysis (Optional but Recommended):** An "Implementation Consultant" service analyzes the tool request to recommend the best implementation method (`api` vs. `function`/code), identify potential credential requirements, and generate an `acceptedStrategy` JSON object. This strategy guides AI generation.
+3.  **Tool Generation/Creation:**
+    *   **AI-Generated:** If using AI generation (`/api/playground/generate-tool-definition`), the `acceptedStrategy` (if provided) heavily influences the output. The AI determines the `implementationType` (`api` or `function`) and generates the corresponding `implementation` (JSON config for API, code string for function). This is then registered via `CORE_createToolFromRequest`.
+    *   **Direct Creation:** Users can directly create tools via `/api/playground/create-tool`, providing the `name`, `description`, `inputs`, `implementation`, and explicitly the `implementationType`. If `implementationType` is `api`, the `implementation` must be a valid JSON configuration.
+4.  **Credential Provisioning:** Users provide necessary secrets (e.g., API keys) either proactively during tool definition (Playground) or dynamically at runtime when a tool requires a missing, declared credential.
+5.  **Tool Update:** Users can update existing tools via `/api/playground/update-tool`, modifying any aspect including `implementation` and `implementationType`.
+6.  **Tool Execution:** Agents utilize loaded tools. The `ToolFactory` uses the `implementationType` to correctly interpret the `implementation` and execute the tool (direct code execution for "function", HTTP request for "api").
 
 ## II. Implementation Consultant
 
 The "Implementation Consultant" is an API service designed to assist in choosing the best way to implement a custom tool's functionality.
 
--   **API Route:** `[src/app/api/playground/analyze-implementation-strategy/route.ts](mdc:src/app/api/playground/analyze-implementation-strategy/route.ts)`
--   **Core Logic:** Resides in `[src/app/api/playground/analyze-implementation-strategy/_core/consultant_logic.ts](mdc:src/app/api/playground/analyze-implementation-strategy/_core/consultant_logic.ts)`
+-   **API Route:** `[src/app/api/playground/analyze-implementation-strategy/route.ts](mdc:ajantic-v1/src/app/api/playground/analyze-implementation-strategy/route.ts)`
+-   **Core Logic:** Resides in `[src/app/api/playground/analyze-implementation-strategy/_core/consultant_logic.ts](mdc:ajantic-v1/src/app/api/playground/analyze-implementation-strategy/_core/consultant_logic.ts)`
 -   **Functionality:**
-    -   Receives a tool definition request (`ConsultationRequest` schema in `[src/app/api/playground/analyze-implementation-strategy/_types/index.ts](mdc:src/app/api/playground/analyze-implementation-strategy/_types/index.ts)`).
-    -   Uses an LLM (model selected in UI, defaults to GPT-4.5) for initial analysis and strategy proposal.
-    -   Performs preliminary research using the Perplexity tool (`[src/lib/agent-tools/perplexity2/perplexity2.ts](mdc:src/lib/agent-tools/perplexity2/perplexity2.ts)`) via `[src/app/api/playground/analyze-implementation-strategy/_core/perplexity_research.ts](mdc:src/app/api/playground/analyze-implementation-strategy/_core/perplexity_research.ts)`.
-    -   Consults an **Implementation Records Store** (Pinecone vector store) for similar past tool implementations using `[src/app/api/playground/analyze-implementation-strategy/_core/pinecone_records.ts](mdc:src/app/api/playground/analyze-implementation-strategy/_core/pinecone_records.ts)`.
-        -   Records include tool request summaries, chosen strategy, success/failure status, and implementation details.
-        -   Uses embeddings of the tool's purpose and inputs for semantic search.
-    -   Performs a basic verification step for the chosen strategy using `[src/app/api/playground/analyze-implementation-strategy/_core/verification_logic.ts](mdc:src/app/api/playground/analyze-implementation-strategy/_core/verification_logic.ts)`.
-    -   Iteratively refines its recommendation if verification fails (up to N attempts).
-    -   Returns a recommended implementation type (`api`, `function`) and an array of `requiredCredentialNames` (e.g., `["STRIPE_API_KEY"]`).
--   **Trigger:** Can be implicitly triggered when a user requests auto-generation of tool implementation, or accessed as a standalone helper in the Playground UI.
+    -   Receives a tool definition request (`ConsultationRequest` schema in `[src/app/api/playground/analyze-implementation-strategy/_types/index.ts](mdc:ajantic-v1/src/app/api/playground/analyze-implementation-strategy/_types/index.ts)`).
+    -   Uses an LLM for initial analysis and strategy proposal.
+    -   Performs preliminary research (e.g., Perplexity).
+    -   Consults an Implementation Records Store (e.g., Pinecone) for similar past tools.
+    -   Returns a recommended `StrategyAnalysis` object (see `[src/app/api/playground/analyze-implementation-strategy/_types/index.ts](mdc:ajantic-v1/src/app/api/playground/analyze-implementation-strategy/_types/index.ts)`), which includes `recommendedType` (`api` or `function`), `strategyDetails`, `warnings`, and `requiredCredentialName`.
+    -   This `StrategyAnalysis` object becomes the `acceptedStrategy` that guides AI generation and is stored (as `acceptedStrategyJson`) with the tool for reference.
+-   **Trigger:** Can be implicitly triggered or accessed as a standalone helper in the Playground UI.
 
 ## III. Secure Credential Management
 
 A system for securely storing and providing credentials to custom tools at runtime.
 
 ### A. Storage & Encryption
-1.  **Database Model:** `UserCredential` model in `[prisma/schema.prisma](mdc:prisma/schema.prisma)` stores `clerkId` (references `User.clerkId`), `credentialName` (e.g., "OPENAI_API_KEY"), and `encryptedSecretValue`.
+1.  **Database Model:** `UserCredential` model in `[prisma/schema.prisma](mdc:ajantic-v1/prisma/schema.prisma)` stores `clerkId` (references `User.clerkId`), `credentialName` (e.g., "OPENAI_API_KEY"), and `encryptedSecretValue`.
     -   `prisma db push` is used for schema updates during prototyping.
-2.  **Encryption Utilities:** `[src/lib/security/credentials.ts](mdc:src/lib/security/credentials.ts)` provides functions for AES-256-GCM encryption (`encryptCredential`) and decryption (`decryptCredential`) using `process.env.CREDENTIAL_ENCRYPTION_KEY`.
-3.  **Save API Endpoint:** `[src/app/api/custom-tool-credentials/save/route.ts](mdc:src/app/api/custom-tool-credentials/save/route.ts)`
+2.  **Encryption Utilities:** `[src/lib/security/credentials.ts](mdc:ajantic-v1/src/lib/security/credentials.ts)` provides functions for AES-256-GCM encryption (`encryptCredential`) and decryption (`decryptCredential`) using `process.env.CREDENTIAL_ENCRYPTION_KEY`.
+3.  **Save API Endpoint:** `[src/app/api/custom-tool-credentials/save/route.ts](mdc:ajantic-v1/src/app/api/custom-tool-credentials/save/route.ts)`
     -   Authenticates user via Clerk (`auth()`).
     -   Receives `credentialName` and `credentialValue`.
     -   Encrypts `credentialValue`.
     -   Upserts the record in the `UserCredential` table, associating with the user's `clerkId`.
-    -   Uses Prisma client from `[src/lib/db.ts](mdc:src/lib/db.ts)`.
+    -   Uses Prisma client from `[src/lib/db.ts](mdc:ajantic-v1/src/lib/db.ts)`.
 
 ### B. Credential Provisioning Methods
 
 Two primary methods for users to provide credentials:
 
 1.  **Playground-First (Preferred & Proactive):**
-    -   **UI:** In the Custom Tool Playground (`[src/app/playground/custom-tool/page.tsx](mdc:src/app/playground/custom-tool/page.tsx)`), a dedicated "Required Credentials" section within the tool definition form.
+    -   **UI:** In the Custom Tool Playground (`[src/app/playground/custom-tool/page.tsx](mdc:ajantic-v1/src/app/playground/custom-tool/page.tsx)`), a dedicated "Required Credentials" section within the tool definition form.
         -   Users can add entries, each with a `credentialName` (unique code identifier, e.g., "MYSERVICE_KEY") and a `credentialLabel` (user-friendly, e.g., "My Service API Key").
         -   For each entry, an input field allows the user to paste the secret value.
         -   A "Save Secret" button next to each input calls the `/api/custom-tool-credentials/save` endpoint.
-    -   **Tool Definition:** When the custom tool is saved, the array of `credentialName`s defined by the user is stored in the `ToolRegistryEntry.requiredCredentialNames` field (defined in `[src/lib/agent-tools/tool-registry/ct-types.ts](mdc:src/lib/agent-tools/tool-registry/ct-types.ts)` as `string[] | null`).
+    -   **Tool Definition:** When the custom tool is saved, the array of `credentialName`s defined by the user is stored in the `ToolRegistryEntry.requiredCredentialNames` field (defined in `[src/lib/agent-tools/tool-registry/ct-types.ts](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-types.ts)` as `string[] | null`).
 2.  **Runtime Prompt (Fallback for Declared but Missing Credentials):**
     -   If a tool *declares* a credential in its `requiredCredentialNames` but the user hasn't provided it via the Playground.
-    -   **Trigger:** `ORCHESTRATION_load_agent_tools` (via `[src/lib/orchestration/utils/custom-tool-loader.ts](mdc:src/lib/orchestration/utils/custom-tool-loader.ts)`) iterates through `requiredCredentialNames`. If `getDecryptedCredential` (from `[src/lib/security/credentials.ts](mdc:src/lib/security/credentials.ts)`) fails to find a specific declared credential, it throws `MissingCredentialError`.
+    -   **Trigger:** `ORCHESTRATION_load_agent_tools` (via `[src/lib/orchestration/utils/custom-tool-loader.ts](mdc:ajantic-v1/src/lib/orchestration/utils/custom-tool-loader.ts)`) iterates through `requiredCredentialNames`. If `getDecryptedCredential` (from `[src/lib/security/credentials.ts](mdc:ajantic-v1/src/lib/security/credentials.ts)`) fails to find a specific declared credential, it throws `MissingCredentialError`.
     -   **Orchestration Handling:**
-        -   Orchestration modes (e.g., `[src/lib/orchestration/modes/manager-directed.ts](mdc:src/lib/orchestration/modes/manager-directed.ts)`, `[src/lib/orchestration/modes/direct-interaction.ts](mdc:src/lib/orchestration/modes/direct-interaction.ts)`) catch `MissingCredentialError` (or check `turnResult.status === 'REQUIRES_CREDENTIAL_INPUT'`).
-        -   The orchestration sets its internal state to `status: "awaiting_credential"` (defined in `[src/lib/orchestration/types/base.ts](mdc:src/lib/orchestration/types/base.ts)`).
-        -   It calls `useAnalysisStore.getState().requireCredentialInput({ credentialName, retryPayload })` (actions defined in `[src/lib/store/analysis-store.ts](mdc:src/lib/store/analysis-store.ts)`). `retryPayload` contains the original `AgentTurnInput`.
+        -   Orchestration modes (e.g., `[src/lib/orchestration/modes/manager-directed.ts](mdc:ajantic-v1/src/lib/orchestration/modes/manager-directed.ts)`, `[src/lib/orchestration/modes/direct-interaction.ts](mdc:ajantic-v1/src/lib/orchestration/modes/direct-interaction.ts)`) catch `MissingCredentialError` (or check `turnResult.status === 'REQUIRES_CREDENTIAL_INPUT'`).
+        -   The orchestration sets its internal state to `status: "awaiting_credential"` (defined in `[src/lib/orchestration/types/base.ts](mdc:ajantic-v1/src/lib/orchestration/types/base.ts)`).
+        -   It calls `useAnalysisStore.getState().requireCredentialInput({ credentialName, retryPayload })` (actions defined in `[src/lib/store/analysis-store.ts](mdc:ajantic-v1/src/lib/store/analysis-store.ts)`). `retryPayload` contains the original `AgentTurnInput`.
         -   The orchestration function then **terminates its current execution** (e.g., `break` from loop, or function returns).
-    -   **UI Prompt (`[src/app/teams/page.tsx](mdc:src/app/teams/page.tsx)`):**
-        -   The `CredentialInputModal` (`[components/global/credential-input-modal.tsx](mdc:components/global/credential-input-modal.tsx)`) appears, driven by `isCredentialPromptRequired` from the Zustand store.
+    -   **UI Prompt (`[src/app/teams/page.tsx](mdc:ajantic-v1/src/app/teams/page.tsx)`):**
+        -   The `CredentialInputModal` (`[components/global/credential-input-modal.tsx](mdc:ajantic-v1/components/global/credential-input-modal.tsx)`) appears, driven by `isCredentialPromptRequired` from the Zustand store.
         -   User provides the secret in the modal. Modal calls `/api/custom-tool-credentials/save`.
         -   On success, `handleCredentialSubmitted` in `teams/page.tsx` is called.
             -   Calls `useAnalysisStore.getState().resolveCredentialInput()` (clears store flags).
             -   **Pre-populates the main chat input** with a message like "Credential '[name]' provided. Please continue." using `agentGlobalChatInputChanged`.
     -   **Resumption:**
         -   User sends the pre-populated message.
-        -   This triggers a **new, standard orchestration run** via `handleOrchestratedChatSubmit` (`[src/lib/workflow/functions/message-handlers/orchestrated-chat.ts](mdc:src/lib/workflow/functions/message-handlers/orchestrated-chat.ts)`).
+        -   This triggers a **new, standard orchestration run** via `handleOrchestratedChatSubmit` (`[src/lib/workflow/functions/message-handlers/orchestrated-chat.ts](mdc:ajantic-v1/src/lib/workflow/functions/message-handlers/orchestrated-chat.ts)`).
         -   The `retryTurnPayload` is NOT used by `handleOrchestratedChatSubmit` for a direct "hot resume."
         -   The Manager agent (in `manager-directed` mode) receives the "Credential provided..." message and decides how to proceed (e.g., re-attempt the original task).
 
 ## IV. Tool Loading and Execution
-1.  **`ORCHESTRATION_load_agent_tools`** (via `[src/lib/orchestration/utils/custom-tool-loader.ts](mdc:src/lib/orchestration/utils/custom-tool-loader.ts)`):
-    -   For custom tools, reads `toolEntry.requiredCredentialNames`.
-    -   Attempts to fetch and decrypt each listed credential using `getDecryptedCredential`.
-    -   If any are missing, throws `MissingCredentialError` (triggering the runtime prompt).
-    -   If all present, makes them available to the tool's execution environment.
-2.  **Agent Execution Utilities:**
-    -   `ORCHESTRATION_executeAgentTurn`
-    -   `ORCHESTRATION_executeManagerTurn`
-    (Both in `[src/lib/orchestration/utils/agent-execution.ts](mdc:src/lib/orchestration/utils/agent-execution.ts)`)
-    These functions are called by the orchestration modes. The credential check happens *before* these are called, during tool loading.
+1.  **`ORCHESTRATION_load_agent_tools`** (via `[src/lib/orchestration/utils/custom-tool-loader.ts](mdc:ajantic-v1/src/lib/orchestration/utils/custom-tool-loader.ts)`):
+    -   Fetches `ToolRegistryEntry`.
+    -   For custom tools, iterates through `toolEntry.requiredCredentialNames` (now an array of `{name, label}` objects), using `cred.name` to call `getDecryptedCredential`.
+    -   Throws `MissingCredentialError` if needed.
+2.  **`ToolFactory.buildTool`** (`[src/lib/agent-tools/tool-registry/factory.ts](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/factory.ts)`):
+    *   Reads `toolEntry.implementationType`.
+    *   **If "function":** Parses `toolEntry.parameters`, creates an executable function from `toolEntry.implementation` (code string).
+    *   **If "api":**
+        *   Parses `toolEntry.implementation` (JSON string) into an API configuration object (endpoint, method, parameterMapping, authType, etc.).
+        *   Constructs a generic API runner tool that uses this configuration to make HTTP requests via `fetch`.
+        *   Handles credentials based on `toolEntry.requiredCredentialNames` and the API config's `authType`.
+    *   Uses `validateImplementationString` from `[src/lib/agent-tools/tool-registry/ct-utils.ts](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-utils.ts)` *before* attempting to build the execute function. This util now uses a Zod schema for comprehensive validation of API config JSON.
+3.  **Agent Execution Utilities:**
+    -   `ORCHESTRATION_executeAgentTurn`, `ORCHESTRATION_executeManagerTurn` in `[src/lib/orchestration/utils/agent-execution.ts](mdc:ajantic-v1/src/lib/orchestration/utils/agent-execution.ts)`.
 
 ## V. Key Types & Interfaces
--   `ToolRegistryEntry` in `[src/lib/agent-tools/tool-registry/ct-types.ts](mdc:src/lib/agent-tools/tool-registry/ct-types.ts)`: Now includes `requiredCredentialNames?: string[] | null;`.
--   `OrchestrationState` in `[src/lib/orchestration/types/base.ts](mdc:src/lib/orchestration/types/base.ts)`: Includes `status: "... | awaiting_credential"`.
--   `AnalysisState` in `[src/lib/store/analysis-store.ts](mdc:src/lib/store/analysis-store.ts)`: Includes state (`isCredentialPromptRequired`, `missingCredentialName`, `retryTurnPayload`) and actions (`requireCredentialInput`, `resolveCredentialInput`) for the credential modal.
--   `AgentTurnInput` in `[src/lib/orchestration/types/base.ts](mdc:src/lib/orchestration/types/base.ts)`: Used for `retryTurnPayload`.
 
+-   `ToolRegistryEntry` (`[src/lib/agent-tools/tool-registry/ct-types.ts](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-types.ts)`): Includes `implementationType: string` and `acceptedStrategyJson?: string | null`. `requiredCredentialNames` is now `({ name: string, label: string })[] | null`.
+-   `RefinedToolDefinition` (`[src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts](mdc:ajantic-v1/src/lib/agent-tools/auto-gen-tool/auto-gen-tool_core.ts)`): Zod schema for AI output, now includes `implementationType`.
+-   `ToolRequest` (`[src/lib/types.ts](mdc:ajantic-v1/src/lib/types.ts)`): Now includes `acceptedStrategy?: StrategyAnalysis | null` and potentially `implementationType` if direct creation is enhanced.
+-   `StrategyAnalysis` (`[src/app/api/playground/analyze-implementation-strategy/_types/index.ts](mdc:ajantic-v1/src/app/api/playground/analyze-implementation-strategy/_types/index.ts)`): Defines the structure of the Implementation Consultant's output.
+-   `apiImplementationConfigSchema` (`[src/lib/agent-tools/tool-registry/ct-utils.ts](mdc:ajantic-v1/src/lib/agent-tools/tool-registry/ct-utils.ts)`): Zod schema for validating the structure of the JSON string in `implementation` when `implementationType` is "api".
 
-This rule summarizes the combined approach for robust and flexible custom tool creation and credential handling.
+## VI. Potential Issues & Watchpoints
+
+*   **Consistency:** Ensure the AI model consistently adheres to outputting the correct `implementationType` and a matching `implementation` structure (JSON for API, code string for function).
+*   **Validation Robustness:** Continuously refine `validateImplementationString`, especially the Zod schema for API configs, as new API patterns or authentication methods are supported.
+*   **Credential Handling in Factory:** Ensure the `ToolFactory` correctly interprets all supported `authType` options from the API config and fetches/applies credentials accordingly.
+*   **Error Propagation:** Errors from `validateImplementationString` or during `ToolFactory.buildTool` (e.g., invalid API config) should be clearly propagated to the user in the Playground or logged effectively during agent runs.
+*   **User Experience for API Tools:** The Playground UI might need adjustments to better support direct creation/editing of API tool configurations (e.g., a structured form for API details if `implementationType` is "api", rather than just a raw JSON string input for `implementation`).
+*   **Legacy Tools:** Consider how older tools created before `implementationType` was introduced will be handled (e.g., default to "function" if `implementationType` is null/undefined in the DB). The `ToolFactory` currently defaults to an error for unknown types; this might need to be more lenient for `null` or `undefined` `implementationType` on older records, defaulting them to "function".
+
+This rule summarizes the enhanced process for custom tool creation, emphasizing type-driven implementation and robust validation.

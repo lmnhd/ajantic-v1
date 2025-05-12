@@ -1,5 +1,5 @@
 import { logger } from "@/src/lib/logger";
-import { ModelProviderEnum, ToolRequest } from "@/src/lib/types";
+import { ModelProviderEnum, ToolRequest, ToolInputParameter } from "@/src/lib/types";
 import { ConsultationHistory } from "../_types";
 import { Document } from "@langchain/core/documents";
 
@@ -13,8 +13,8 @@ export function summarizeHistory(history: ConsultationHistory, maxRounds = 2): s
 User Modifications: ${round.modificationsRequested.join(', ') || 'None'}
 Recommendation: ${round.analysis.recommendedType}
 Details: ${round.analysis.strategyDetails}
-Warnings: ${round.analysis.warnings.join('; ')}
-Verification: ${round.verification.status} - ${round.verification.details}
+Warnings: ${(round.analysis.warnings || []).join('; ') || 'None'}
+Verification: ${round.verification?.status || 'N/A'} - ${round.verification?.details || 'N/A'}
 --- End Round ${round.round} ---`).join('\n');
 }
 
@@ -31,7 +31,7 @@ export function mapProviderStringToEnum(providerString?: string): ModelProviderE
 // Helper to normalize domain/service name
 export function normalizeAndExtractDomain(toolRequest: ToolRequest): string {
     // Placeholder: Extract from URL input or guess from name/description
-    const urlInput = toolRequest.inputs.find(inp => inp.name.toLowerCase().includes('url'))?.default as string;
+    const urlInput = toolRequest.inputs.find((inp: ToolInputParameter) => inp.name.toLowerCase().includes('url'))?.default as string;
     if (urlInput) {
         try {
             const hostname = new URL(urlInput).hostname;

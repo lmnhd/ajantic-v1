@@ -8,6 +8,9 @@ import {
     ConsultationHistory,
     ConsultationRound,
     VerificationResult,
+    ApiConsultationRequest as ConsultationRequest,
+    RecommendedImplementationType,
+    ResearchDepth
 } from "../_types";
 // Import utility to get model (assuming this exists and works like in other files)
 import { MODEL_getModel_ai } from '@/src/lib/vercelAI-model-switcher';
@@ -25,7 +28,7 @@ import { normalizeAndExtractDomain, summarizeCoreTask, formatRecordsForPrompt, s
 
 // Define the Zod schema for the expected LLM output (matching AnalysisResult type)
 const analysisResultSchema = z.object({
-    recommendedType: z.enum(["api", "function", "undetermined"]).describe("Recommended implementation type ('api' or 'function', or 'undetermined' if unsure)."),
+    recommendedType: z.enum(["api", "function"]).describe("Recommended implementation type ('api' or 'function', or 'undetermined' if unsure)."),
     strategyDetails: z.string().describe("Detailed explanation of the recommended strategy. If 'api', include potential endpoint URL(s). If 'function', outline logic, suggest helpers (e.g., fetch, firecrawl, cheerio, visual scrape)."),
     warnings: z.array(z.string()).describe("List potential issues, blockers, or reasons why other types were ruled out (e.g., 'No public API found', 'Scraping likely blocked', 'JS rendering required')."),
     requiredCredentialName: z.string().optional().describe("If 'api' is recommended and needs authentication, specify the credential name needed (e.g., 'SERVICE_API_KEY', 'OAUTH_TOKEN').")
@@ -58,7 +61,7 @@ function mapProviderStringToEnum(providerString?: string): ModelProviderEnum | u
 }
 
 // --- Constants ---
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 3; // Ensure at least 2, 3 is safer for one retry after detailed
 const PINECONE_NAMESPACE = "implementation-records"; // Define namespace
 const PINECONE_TOP_K = 3; // Number of records to retrieve
 
@@ -67,72 +70,65 @@ const PINECONE_TOP_K = 3; // Number of records to retrieve
 
 /**
  * Orchestrates the analysis and verification phases, iterating on failure.
- * Includes querying Pinecone for relevant past records.
+ * Includes querying Pinecone for relevant past records and potentially deepening research.
  */
 export async function analyzeAndVerifyStrategy(
-     toolRequest: ToolRequest,
+     toolRequestInput: ConsultationRequest['currentToolRequest'],
      initialHistory: ConsultationHistory,
      initialModifications: string[],
      modelArgsFromRequest?: { /* ... */ } | null
 ): Promise<{ finalAnalysisResult: AnalysisResult; finalVerificationResult: VerificationResult; attemptHistory: ConsultationHistory }> {
-    logger.info("Consultant Orchestrator: Starting iterative analysis...", { toolName: toolRequest.name });
+    logger.info("Consultant Orchestrator: Starting iterative analysis...", { toolName: toolRequestInput.name });
 
-    // --- Query Pinecone for Relevant Records ---
-    let previousRecordsSummary = "Could not query past records.";
-    try {
-        const normalizedDomain = normalizeAndExtractDomain(toolRequest);
-        const normalizedTaskSummary = summarizeCoreTask(toolRequest);
-        const queryText = `${normalizedDomain} ${normalizedTaskSummary} ${toolRequest.description}`; // Simple query text
+    const toolRequest: ToolRequest = {
+        ...toolRequestInput,
+        examples: toolRequestInput.examples?.map(ex => ({
+            input: ex.input,
+            output: ex.output ?? null
+        }))
+    };
 
-        logger.debug("Consultant Orchestrator: Querying Pinecone", { namespace: PINECONE_NAMESPACE, domain: normalizedDomain, task: normalizedTaskSummary });
-
-        // Initialize Pinecone client and index
-        const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY!, fetchApi: fetch }); // Ensure fetchApi is passed if needed
-        const pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX!);
-
-        const vectorStore = await PineconeStore.fromExistingIndex(
-            new OpenAIEmbeddings(), // Use your standard embeddings
-            { pineconeIndex, namespace: PINECONE_NAMESPACE }
-        );
-
-        // Perform similarity search with metadata filter (optional but recommended)
-        const relevantRecords = await vectorStore.similaritySearch(
-            queryText,
-            PINECONE_TOP_K
-            // Example filter - adjust as needed
-            // { targetServiceOrDomain: normalizedDomain }
-        );
-        logger.debug(`Consultant Orchestrator: Found ${relevantRecords.length} relevant records in Pinecone.`);
-
-        previousRecordsSummary = formatRecordsForPrompt(relevantRecords);
-
-    } catch (error) {
-        logger.error("Consultant Orchestrator: Error querying Pinecone", { error: error instanceof Error ? error.message : String(error) });
-        // Continue without past records if Pinecone fails
-        previousRecordsSummary = "Error querying past records.";
-    }
-    // --- End Pinecone Query ---
-
+    let previousRecordsSummary = "Could not query past records."; // Placeholder for Pinecone logic
 
     let attemptCounter = 0;
     let currentHistory = [...initialHistory];
     let currentModifications = [...initialModifications];
-    let analysisResult: AnalysisResult | undefined; // Initialize as undefined
-    let verificationResult: VerificationResult | undefined; // Initialize as undefined
+    let analysisResult: AnalysisResult | undefined;
+    let verificationResult: VerificationResult | undefined;
     let internalAttemptHistory: ConsultationHistory = [];
+    let currentResearchDepth = ResearchDepth.BASIC; // Start with BASIC depth
+    let detailedSearchPerformedThisCall = false; // Prevent multiple detailed searches in one call
 
     while (attemptCounter < MAX_ATTEMPTS) {
         attemptCounter++;
-        logger.info(`Consultant Orchestrator: Attempt ${attemptCounter}/${MAX_ATTEMPTS}`);
+        logger.info(`Consultant Orchestrator: Attempt ${attemptCounter}/${MAX_ATTEMPTS} with research depth: ${currentResearchDepth}`);
 
-        // 1. Run Analysis Phase - PASS PINEONE RESULTS
-        analysisResult = await runAnalysisPhase(
+        // 1. Run Analysis Phase
+        const strategyAnalysisObj = await runAnalysisPhase(
             toolRequest,
-            currentHistory,
-            currentModifications,
-            previousRecordsSummary, // Pass the retrieved records summary
+            currentHistory, // Pass the history accumulated within this call for context
+            currentModifications, // Pass modifications specific to this attempt
+            previousRecordsSummary,
+            currentResearchDepth, // Pass current research depth
             modelArgsFromRequest
         );
+
+        if (!strategyAnalysisObj || !strategyAnalysisObj.analysis) {
+            logger.error("Consultant Orchestrator: runAnalysisPhase did not return a valid analysis object.");
+            analysisResult = {
+                consultationId: `error-${Date.now()}-${attemptCounter}`,
+                recommendedType: RecommendedImplementationType.ERROR,
+                strategyDetails: "Critical error: Failed to get analysis object from analysis phase.",
+                warnings: ["Internal error in analysis phase"],
+                confidence: "low",
+                strategyTitle: "Analysis Error",
+                potentialIssues: ["Internal error in analysis phase"],
+                preliminaryFindings: previousRecordsSummary,
+                preliminaryResearchFor: undefined, // Or attempt to get from toolRequest if possible
+            };
+        } else {
+            analysisResult = strategyAnalysisObj.analysis;
+        }
 
         // 2. Run Verification Phase
         verificationResult = await runVerificationPhase(
@@ -140,57 +136,93 @@ export async function analyzeAndVerifyStrategy(
             toolRequest
         );
 
-        // 3. Record this attempt internally
-        const { latestRound: attemptRound, updatedHistory: historyAfterAttempt } = updateConsultationHistory(
-            // Decide if internalAttemptHistory or currentHistory should determine round number
-             internalAttemptHistory, // Using internal history ensures rounds start from 1 for this *call*
-            currentModifications,
+        // 3. Record this attempt
+        const { latestRound: attemptRound } = updateConsultationHistory(
+            internalAttemptHistory, // Use internalAttemptHistory to correctly number rounds for *this call's* attempts
+            currentModifications, 
             analysisResult,
             verificationResult
         );
         internalAttemptHistory.push(attemptRound);
+        currentHistory = [...initialHistory, ...internalAttemptHistory]; // Update currentHistory for next *potential* loop iteration
+                                                                     // or for final context if exiting.
 
         // 4. Check Verification Status
         if (verificationResult.status !== 'failure') {
             logger.info(`Consultant Orchestrator: Verification successful/skipped on attempt ${attemptCounter}.`);
-            break;
+            break; 
         }
 
-        // --- Verification Failed ---
+        // --- Verification Failed --- (This block is reached if verification.status IS 'failure')
         logger.warn(`Consultant Orchestrator: Verification failed on attempt ${attemptCounter}.`, { details: verificationResult.details });
+        // Default modification if no detailed search is triggered initially for the next loop, will be overwritten if detailed search is triggered.
+        currentModifications = [`Attempt ${attemptCounter} (Strategy: ${analysisResult.recommendedType}, Depth: ${currentResearchDepth}) failed verification: ${verificationResult.details}. Please propose an alternative strategy or refine details.`];
 
-        if (attemptCounter >= MAX_ATTEMPTS) {
-             logger.warn(`Consultant Orchestrator: Max attempts (${MAX_ATTEMPTS}) reached.`);
-            break;
+        // 5. Decide if a DETAILED search is needed and hasn't been done yet in this call
+        let triggerDetailedSearch = false;
+        if (analysisResult.recommendedType === RecommendedImplementationType.API && 
+            currentResearchDepth === ResearchDepth.BASIC && 
+            !detailedSearchPerformedThisCall) {
+            
+            const endpointSeemsValid = analysisResult.extractedApiEndpoint && analysisResult.extractedApiEndpoint.startsWith('http');
+            const essentialParams = toolRequest.inputs.filter(p => p.required !== false && !p.name.match(/instruction|format|context|user_input/i));
+            let paramsSeemCovered = true; // Assume true if no essential params
+            if (essentialParams.length > 0) {
+                 paramsSeemCovered = essentialParams.every(param => {
+                    return (analysisResult?.strategyDetails && analysisResult.strategyDetails.toLowerCase().includes(param.name.toLowerCase())) ||
+                           param.name.match(/query|id|search|url|path|body|filter|term/i);
+                });
+            }
+
+            if (!endpointSeemsValid || !paramsSeemCovered) {
+                logger.info(`Consultant Orchestrator: API strategy from BASIC research is incomplete. Endpoint present: ${!!endpointSeemsValid}, Params covered: ${paramsSeemCovered}. Triggering DETAILED search.`);
+                triggerDetailedSearch = true;
+            }
         }
 
-        // 5. Prepare for Next Attempt
-        const failureFeedback = `Attempt ${attemptCounter} (Strategy: ${analysisResult.recommendedType}) failed verification: ${verificationResult.details}. Please propose an alternative strategy, considering past records and original request.`;
-        currentModifications = [failureFeedback]; // Set mods for next loop
-        currentHistory = historyAfterAttempt; // Use history including failed attempt for context
-        // Reset previousRecordsSummary for next LLM call? Probably not needed, LLM should use history now.
+        if (triggerDetailedSearch) {
+            currentResearchDepth = ResearchDepth.DETAILED;
+            detailedSearchPerformedThisCall = true; // Mark that we are doing it now
+            // Replace currentModifications to focus on the detailed search task
+            currentModifications = ["Previous API analysis from basic research lacked a clear, usable endpoint or complete parameter coverage. A detailed API endpoint search has now been performed; use its new findings to refine the API strategy, including the exact endpoint and parameter mapping."];
+            logger.info(`Consultant Orchestrator: Deepening research for attempt ${attemptCounter}. Next call to runAnalysisPhase will use DETAILED depth.`);
+            // No 'continue' is strictly needed as the code flows to the loop's next iteration check.
+            // The attemptCounter will increment at the start of the loop, and the while condition will be re-evaluated.
+        } else {
+            // Not triggering a detailed search (either not an API, or detailed already done, or conditions not met)
+            // If verification failed and we're not doing a detailed search now, check max attempts before continuing the loop for a standard retry.
+            if (attemptCounter >= MAX_ATTEMPTS) {
+                logger.warn(`Consultant Orchestrator: Max attempts (${MAX_ATTEMPTS}) reached after verification failure and no detailed search triggered this round.`);
+                break; // Exit loop if max attempts reached and not doing a new detailed search
+            }
+        }
+        // Loop continues if attemptCounter < MAX_ATTEMPTS (and no break occurred)
 
-        logger.info(`Consultant Orchestrator: Preparing for attempt ${attemptCounter + 1}`);
     } // End while loop
 
-    // Ensure results are defined before returning
     if (!analysisResult || !verificationResult) {
-        logger.error("Consultant Orchestrator: Failed to get analysis/verification results within loop.", { attemptCounter });
-        // Provide a default error state if something went fundamentally wrong
-        analysisResult = analysisResult ?? { recommendedType: 'undetermined', strategyDetails: 'Orchestration loop failed unexpectedly.', warnings: ['Internal error'], requiredCredentialName: undefined };
-        verificationResult = verificationResult ?? { status: 'failure', details: 'Orchestration loop failed unexpectedly.' };
+        logger.error("Consultant Orchestrator: Loop finished without analysis/verification results.", { attemptCounter });
+        analysisResult = analysisResult ?? {
+            consultationId: `error-${Date.now()}-fallback`,
+            recommendedType: RecommendedImplementationType.ERROR,
+            strategyDetails: 'Orchestration loop failed unexpectedly or exited early.',
+            warnings: ['Internal error in consultant_logic fallback'],
+            requiredCredentialName: undefined,
+            confidence: "low",
+            strategyTitle: "Orchestration Error",
+            potentialIssues: ["Internal error in consultant_logic fallback"],
+            preliminaryFindings: "N/A",
+            preliminaryResearchFor: undefined,
+        };
+        verificationResult = verificationResult ?? { status: 'failure', details: 'Orchestration loop failed unexpectedly or exited early (fallback).' };
     }
 
-    logger.info("Consultant Orchestrator: Iteration complete.", { /* ... */ });
-
-    // --- TODO: Add Pinecone Saving Logic Here (after loop) ---
-    // await saveImplementationRecord(toolRequest, analysisResult, verificationResult, internalAttemptHistory);
-
-
+    logger.info("Consultant Orchestrator: Iteration complete.", { finalRecommendedType: analysisResult.recommendedType, finalVerificationStatus: verificationResult.status, totalAttemptsThisCall: internalAttemptHistory.length });
+    
     return {
         finalAnalysisResult: analysisResult,
         finalVerificationResult: verificationResult,
-        attemptHistory: internalAttemptHistory
+        attemptHistory: internalAttemptHistory 
      };
 }
 

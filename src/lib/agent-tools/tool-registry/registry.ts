@@ -28,7 +28,8 @@ export const ToolRegistry = {
     parameters: any[],
     implementation: string,
     implementationType: string = "function",
-    metadata: { [key: string]: any } = {}
+    metadata: { [key: string]: any } = {},
+    acceptedStrategyJson?: string | null
   ): Promise<string> {
     return CUSTOM_TOOL_registerTool(
       userId,
@@ -37,7 +38,8 @@ export const ToolRegistry = {
       parameters,
       implementation,
       implementationType,
-      metadata
+      metadata,
+      acceptedStrategyJson
     );
   },
   
@@ -62,6 +64,7 @@ export const ToolRegistry = {
       implementation?: string;
       implementationType?: string;
       metadata?: { [key: string]: any };
+      acceptedStrategyJson?: string | null;
     }
   ): Promise<string> {
     return CUSTOM_TOOL_updateTool(id, updates);

@@ -1,6 +1,6 @@
 import { logger } from "@/src/lib/logger";
-import { ToolRequest } from "@/src/lib/types";
 import { AnalysisResult, VerificationResult } from "../_types";
+import { ToolRequest, ToolInputParameter } from "@/src/lib/types";
 
 /**
  * Performs basic live verification based on the analysis result.
@@ -58,8 +58,10 @@ export async function performVerification(
                      }
                 }
             } else {
-                details = 'Verification skipped: Could not determine API endpoint from analysis details.';
-                 logger.warn("Verification Logic: Could not extract endpoint for API verification", { details: analysis.strategyDetails });
+                // If API type but no endpoint found, consider it a verification failure to trigger detailed search.
+                status = 'failure'; 
+                details = 'Verification Failed: Could not determine a valid API endpoint from the current analysis details. A more detailed search may be required.';
+                 logger.warn("Verification Logic: Could not extract endpoint for API verification, marking as failure.", { details: analysis.strategyDetails });
             }
         } else if (analysis.recommendedType === "function") {
             // TODO: Improve scraping detection logic
@@ -70,7 +72,7 @@ export async function performVerification(
                                analysis.strategyDetails.toLowerCase().includes("visual");
 
              // TODO: Improve target URL extraction logic
-            let targetUrl = toolRequest.inputs.find(inp => inp.name.toLowerCase().includes('url'))?.default as string;
+            let targetUrl = toolRequest.inputs.find((inp: ToolInputParameter) => inp.name.toLowerCase().includes('url'))?.default as string;
             if (!targetUrl) {
                  targetUrl = analysis.strategyDetails.match(/https?:\/\/[^\s'"]+/)?.[0] || ""; // Try extracting from details
             }
@@ -121,4 +123,11 @@ export async function performVerification(
 
     logger.info("Verification Logic: Verification complete", { status, details });
     return { status, details };
+}
+
+export async function TOOLS_performBasicVerification(
+    analysis: AnalysisResult,
+    toolRequest: ToolRequest
+): Promise<VerificationResult | null> {
+  return performVerification(analysis, toolRequest);
 }

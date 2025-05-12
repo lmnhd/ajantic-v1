@@ -1,9 +1,11 @@
 import { z } from "zod";
-import { ToolRequest, ToolInputParameter, ModelArgs, ModelProviderEnum } from "@/src/lib/types"; // Assuming ToolRequest and others are here
+import { ToolRequest as ImportedToolRequest, ModelProviderEnum } from "@/src/lib/types"; // Assuming ToolRequest and ModelProviderEnum are well-defined here
 
-// --- Schemas for Core Data ---
+// --- Zod Schemas (Primarily for API runtime validation) ---
 
-// Reuse existing ToolInputParameter schema if defined elsewhere, or define here
+// Re-exporting ToolRequest if it's only from lib/types and not modified here
+export type ToolRequest = ImportedToolRequest;
+
 const inputParameterSchema = z.object({
     name: z.string(),
     type: z.enum(["string", "number", "boolean", "array", "object"]),
@@ -12,8 +14,8 @@ const inputParameterSchema = z.object({
     default: z.any().optional()
 });
 
-// Reuse existing ToolRequest schema if defined elsewhere, or define here
-export const toolRequestSchema = z.object({
+// Zod schema for ToolRequest - can be used for validating currentToolRequest
+export const toolRequestZodSchema = z.object({
     name: z.string(),
     description: z.string(),
     purpose: z.string().optional(),
@@ -21,67 +23,186 @@ export const toolRequestSchema = z.object({
     expectedOutput: z.string(),
     category: z.string().optional(),
     additionalContext: z.string().optional(),
-    implementation: z.string().optional(), // May or may not be present
+    implementation: z.string().optional(),
     modificationRequests: z.array(z.string()).optional(),
     examples: z.array(z.object({
         input: z.record(z.any()),
         output: z.any()
     })).optional(),
-    // Add examples, etc. if part of your standard ToolRequest
-}).passthrough(); // Allow other fields
+}).passthrough();
 
-// --- Schemas for Consultation Process ---
+const preliminaryResearchIdentifiersZodSchema = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  serviceName: z.string().optional(),
+  targetUrl: z.string().optional(),
+});
 
-// Represents the result of one round of analysis and verification
-const consultationRoundSchema = z.object({
+// --- Authoritative Manual Interface Definitions ---
+
+// Changed from type alias to enum for z.nativeEnum compatibility
+export enum RecommendedImplementationType {
+    FUNCTION = "function",
+    API = "api",
+    UNKNOWN = "unknown",
+    ERROR = "error"
+}
+
+export enum ResearchDepth {
+    BASIC = "BASIC",
+    DETAILED = "DETAILED"
+}
+
+export interface PreliminaryResearchIdentifiers {
+    name: string;
+    description: string;
+    serviceName: string;
+    targetUrl: string;
+}
+
+export interface AnalysisResult {
+    consultationId?: string;
+    recommendedType: RecommendedImplementationType;
+    confidence?: "high" | "medium" | "low";
+    strategyTitle?: string;
+    strategyDetails: string;
+    potentialIssues?: string[];
+    exampleUsage?: string;
+    requiredCredentialName?: string | null | undefined;
+    warnings?: string[]; // Can be same as potentialIssues or separate
+    extractedApiEndpoint?: string;
+    preliminaryFindings?: string;
+    preliminaryResearchFor?: PreliminaryResearchIdentifiers;
+}
+
+export interface VerificationResult {
+    status: 'success' | 'failure' | 'skipped';
+    details: string;
+    verifiedAt?: string; // ISO string
+}
+
+export interface ConsultationRound {
+    round: number;
+    modificationsRequested: string[];
+    analysis: AnalysisResult;
+    verification?: VerificationResult | null;
+    timestamp: string; // Typically ISO string
+}
+
+export type ConsultationHistory = ConsultationRound[];
+
+export interface ConsultationRequestContext {
+    currentToolRequest: ToolRequest;
+    researchDepth?: ResearchDepth;
+    userContext?: string;
+    previousAnalysis?: ConsultationRound | null | undefined;
+}
+
+export interface UserFeedback {
+    isHelpful: boolean;
+    suggestedCorrection?: string;
+    rating?: number; // e.g., 1-5
+}
+
+export interface StrategyAnalysis {
+    id: string;
+    consultationId: string;
+    timestamp: Date;
+    request: ConsultationRequestContext;
+    analysis: AnalysisResult;
+    verification?: VerificationResult | null;
+    feedback?: UserFeedback | null;
+    status: "pending" | "completed" | "failed";
+    error?: string;
+    version: string;
+}
+
+// --- Zod Schemas continued (for API validation, complementing manual types) ---
+
+// Zod schema for AnalysisResult - useful for validating parts of the LLM output if generateObject uses it.
+// It might be less comprehensive than the manual AnalysisResult interface.
+const analysisResultZodSchema = z.object({
+    recommendedType: z.nativeEnum(RecommendedImplementationType), // Now correctly uses the enum
+    strategyDetails: z.string(),
+    warnings: z.array(z.string()).optional(),
+    requiredCredentialName: z.string().optional().nullable(),
+    // Other fields like confidence, strategyTitle might be added by LLM_generateStrategySuggestion
+    // and not strictly part of the generateObject schema.
+});
+
+const verificationResultZodSchema = z.object({
+    status: z.enum(["success", "failure", "skipped"]), // Corrected quotes
+    details: z.string()
+});
+
+const consultationRoundZodSchema = z.object({
     round: z.number().int().positive(),
-    modificationsRequested: z.array(z.string()).describe("User modifications for this round"),
-    analysis: z.object({
-        recommendedType: z.enum(["api", "function", "undetermined"]), // Added undetermined
-        strategyDetails: z.string().describe("Explanation of the strategy (e.g., API endpoint, function logic outline)"),
-        warnings: z.array(z.string()).describe("Potential issues or blockers"),
-        requiredCredentialName: z.string().optional().describe("Name of the credential needed, if any")
-    }).describe("Analysis results from LLM/Perplexity"),
-    verification: z.object({
-        status: z.enum(["success", "failure", "skipped"]),
-        details: z.string().describe("Outcome of the live verification test")
-    }).describe("Verification results"),
+    modificationsRequested: z.array(z.string()),
+    analysis: analysisResultZodSchema, // Use the Zod version for analysis here
+    verification: verificationResultZodSchema.optional().nullable(),
     timestamp: z.string().datetime(),
 });
-export type ConsultationRound = z.infer<typeof consultationRoundSchema>;
 
-// Represents the history of the consultation
-const consultationHistorySchema = z.array(consultationRoundSchema);
-export type ConsultationHistory = z.infer<typeof consultationHistorySchema>;
+const consultationHistoryZodSchema = z.array(consultationRoundZodSchema);
 
-// --- ModelArgs Schema (copied from generate-tool-definition route for consistency) ---
 const providerEnumValues = Object.values(ModelProviderEnum) as [string, ...string[]];
-const modelArgsSchema = z.object({
-    provider: z.enum(providerEnumValues), // Use the enum values directly
+const modelArgsZodSchema = z.object({
+    provider: z.enum(providerEnumValues),
     modelName: z.string(),
     temperature: z.number().optional().default(0.7),
     topP: z.number().optional(),
-    maxTokens: z.number().optional(), // Assuming maxTokens maps to maxOutputTokens if needed
+    maxTokens: z.number().optional(),
 }).optional();
-// --- End ModelArgs Schema ---
 
-// Schema for the incoming request to the API endpoint
-export const consultationRequestSchema = z.object({
+// Schema for the incoming request to the API endpoint (renamed to avoid TS name clash)
+export const apiConsultationRequestZodSchema = z.object({
     userId: z.string().min(1),
-    currentToolRequest: toolRequestSchema,
-    consultationHistory: consultationHistorySchema.optional().default([]),
+    currentToolRequest: toolRequestZodSchema, // Use Zod schema for request part
+    consultationHistory: consultationHistoryZodSchema.optional().default([]),
     newStrategyModifications: z.array(z.string()).optional().default([]),
-    modelArgs: modelArgsSchema, // **** ADDED: Optional modelArgs ****
+    modelArgs: modelArgsZodSchema.optional(), // Made optional for clarity
+    researchDepth: z.nativeEnum(ResearchDepth).optional(),
 });
-export type ConsultationRequest = z.infer<typeof consultationRequestSchema>;
+export type ApiConsultationRequest = z.infer<typeof apiConsultationRequestZodSchema>;
 
-// Schema for the response from the API endpoint
-export const consultationResponseSchema = z.object({
-    latestRound: consultationRoundSchema,
-    updatedHistory: consultationHistorySchema,
+// Schema for the response from the API endpoint (renamed to avoid TS name clash)
+export const apiConsultationResponseZodSchema = z.object({
+    latestRound: consultationRoundZodSchema,
+    updatedHistory: consultationHistoryZodSchema,
+    strategyAnalysis: z.custom<StrategyAnalysis>() // For the full object, often easier to use custom or any
 });
-export type ConsultationResponse = z.infer<typeof consultationResponseSchema>;
+export type ApiConsultationResponse = z.infer<typeof apiConsultationResponseZodSchema>;
 
-// Internal types (can be expanded in consultant_logic.ts)
-export type AnalysisResult = z.infer<typeof consultationRoundSchema>['analysis'];
-export type VerificationResult = z.infer<typeof consultationRoundSchema>['verification'];
+
+// Helper function
+export function createEmptyStrategyAnalysis(requestContext: ConsultationRequestContext, consultationIdInput?: string): StrategyAnalysis {
+    const now = new Date();
+    const currentConsultationId = consultationIdInput || `default-consult-${now.getTime()}`;
+    return {
+        id: `analysis-${now.getTime()}-${Math.random().toString(36).substring(2, 9)}`,
+        consultationId: currentConsultationId,
+        timestamp: now,
+        request: requestContext,
+        analysis: {
+            consultationId: currentConsultationId,
+            recommendedType: RecommendedImplementationType.UNKNOWN,
+            strategyDetails: 'Analysis not yet performed.',
+            warnings: [],
+            potentialIssues: [],
+            confidence: 'low',
+            strategyTitle: 'Initial Analysis',
+            extractedApiEndpoint: undefined,
+            preliminaryFindings: undefined,
+            preliminaryResearchFor: undefined,
+            requiredCredentialName: undefined,
+            exampleUsage: undefined,
+        },
+        verification: null,
+        feedback: null,
+        status: 'pending',
+        version: '1.2.1', // Incremented version
+    };
+}
+
+// Note: ModelProviderEnum should be correctly defined in or imported into @/src/lib/types
+// If ToolRequest from @/src/lib/types is just an interface, toolRequestZodSchema here can serve as its validator.

@@ -1,0 +1,132 @@
+---
+description: Debugging issues
+globs: 
+alwaysApply: false
+---
+# Next.js Server-Side Debugging Setup (Windows)
+
+This rule outlines the working configuration for server-side debugging of Next.js API routes in this project, specifically on Windows, primarily focusing on the Webpack-based development server. It also includes notes on attempts to debug with Turbopack.
+
+## Relevant Files
+
+*   NPM Scripts: [`package.json`](mdc:ajantic-v1/ajantic-v1/package.json)
+*   VS Code Debugger Configurations: [`.vscode/launch.json`](mdc:ajantic-v1/ajantic-v1/.vscode/launch.json)
+
+## 1. Debugging with Webpack (Recommended Stable Method)
+
+This is the setup that was found to be consistently effective.
+
+### 1.1. NPM Script for Starting the Debug Server (Webpack)
+
+The following script in `package.json` should be used to start the Next.js development server (Webpack mode) with debugging enabled:
+
+```json
+// In package.json "scripts":
+"dev:debug:win": "set NODE_OPTIONS=--inspect --max-old-space-size=4096 && next dev"
+```
+This script sets the `NODE_OPTIONS` to enable the Node.js inspector and then starts the Next.js dev server (which defaults to Webpack mode).
+
+### 1.2. VS Code Launch Configuration for Webpack (`launch.json`)
+
+The following "attach" configuration in [`.vscode/launch.json`](mdc:ajantic-v1/ajantic-v1/.vscode/launch.json) is used to connect the VS Code debugger to the running Next.js Webpack server:
+
+```json
+{
+  "name": "Next.js: Attach to Server (Simple)", // Or "Next.js: Attach to Webpack Server"
+  "type": "node",
+  "request": "attach",
+  "port": 9230, // Next.js often uses 9230 for its router server with Webpack
+  "skipFiles": ["<node_internals>/**"],
+  "sourceMaps": true,
+  "restart": true
+}
+```
+
+### 1.3. Debugging Steps for Webpack
+
+1.  **Clean Slate (Recommended):** Close VS Code, end lingering `node.exe` processes (Task Manager), optionally delete `.next`, and consider a PC restart if port conflicts persist.
+2.  **Start Server Manually:** Open PowerShell, navigate to project root, run `npm run dev:debug:win`.
+3.  **Observe Terminal Output:** Note the initial `Debugger listening on...` (likely 9229) and then the crucial message from Next.js: `...the Next.js router server should be inspected at XXXX` (often 9230 for Webpack). **Ensure the `port` in the launch configuration matches this XXXX.**
+4.  **Attach VS Code Debugger:** Select the "Next.js: Attach to Server (Simple)" configuration and start debugging (F5).
+5.  **Set Breakpoints:** Place breakpoints in server-side API routes.
+
+## 2. Notes on Debugging with Turbopack
+
+Attempts to debug with Turbopack revealed several challenges and specific behaviors:
+
+### 2.1. NPM Script for Turbopack
+
+The script used for running Turbopack with debugging enabled was:
+```json
+// In package.json "scripts":
+"turbo": "set NODE_OPTIONS=--inspect --max-old-space-size=4096 && next dev --turbo"
+```
+Or, to specify an initial port (e.g., 9235, though Next.js often still chose a subsequent port for the router server):
+```json
+"turbo": "set NODE_OPTIONS=--inspect=9235 --max-old-space-size=4096 && next dev --turbo"
+```
+
+### 2.2. Turbopack Port Behavior
+
+*   Similar to Webpack, when `NODE_OPTIONS` included `--inspect`, an initial debugger port would be announced (e.g., 9229 or the specified 9235).
+*   Next.js (with Turbopack) would then announce a *subsequent* port for its actual router server (e.g., 9230 or 9236).
+*   **Crucially, an error `Starting inspector on <router_server_port> failed: address already in use` was frequently observed *after* the router server port was declared and *during* the compilation of a specific route (e.g., `/playground/bp-check`).** This indicated an internal conflict or race condition within Turbopack's debug port management.
+
+### 2.3. VS Code Launch Configuration for Turbopack (Attach Attempt)
+
+An attach configuration similar to the Webpack one was used, targeting the port Turbopack declared for its router server (e.g., 9236):
+```json
+{
+  "name": "Next.js: Debug with Turbopack", // Or "Next.js: Attach to Turbopack Server"
+  "type": "node",
+  "request": "attach",
+  "port": 9236, // Example port reported by Turbopack for its router server
+  "skipFiles": ["<node_internals>/**"],
+  "sourceMaps": true,
+  "trace": true, // Trace was enabled for diagnostics
+  "remoteRoot": "${workspaceFolder}",
+  "resolveSourceMapLocations": [
+    "${workspaceFolder}/.next/**",
+    "${workspaceFolder}/.turbo/**",
+    "!**/node_modules/**"
+  ]
+}
+```
+Despite matching the port, breakpoints were not reliably hit, likely due to the internal "address already in use" error on the server side.
+
+### 2.4. `node-terminal` Launch Type Attempt for Turbopack
+
+A `node-terminal` launch configuration was also attempted to let VS Code manage the process more directly:
+```json
+{
+  "name": "Next.js: Turbopack (node-terminal)",
+  "type": "node-terminal",
+  "request": "launch",
+  "command": "npm run turbo", // Script modified to remove --inspect from NODE_OPTIONS for this
+  "cwd": "${workspaceFolder}",
+  "skipFiles": ["<node_internals>/**"],
+  "sourceMaps": true
+}
+```
+This also did not consistently resolve the breakpoint issues, and the underlying "address already in use" server-side error remained a primary concern.
+
+### 2.5. Turbopack Configuration Warning
+
+When running `npm run turbo`, the following warning was consistently observed:
+`⚠ Webpack is configured while Turbopack is not, which may cause problems.`
+This indicates that if `next.config.js` contains Webpack-specific customizations, they are ignored by Turbopack. Turbopack has its own configuration options within `next.config.js`.
+
+## Conclusion on Debugging Mode
+
+*   **Webpack Mode:** The `dev:debug:win` script combined with the simple "attach" configuration targeting the Next.js router server port (commonly 9230) proved to be the working solution for server-side API route debugging.
+*   **Turbopack Mode:** Debugging was unreliable due to apparent internal conflicts with debug port allocation by Next.js/Turbopack, specifically the "address already in use" error occurring for the designated router server debug port *after* initial startup. Further investigation or updates to Next.js/Turbopack might be needed to stabilize debugging in this mode on Windows for this project.
+
+## General Important Notes on Ports:
+
+*   Next.js often uses a two-port system when `--inspect` is broadly enabled via `NODE_OPTIONS`. The initial Node.js process might listen on one port, but the actual Next.js application code (API routes, server components) is often debugged on a subsequent port.
+*   Always verify the port Next.js states its "router server should be inspected at" from the terminal output, and ensure your `launch.json` "attach" configuration uses that specific port.
+*   If "address already in use" errors occur at the very start of `npm run ...`, it's crucial to identify and terminate the conflicting external processes before attempting to debug. If the error occurs *internally* by Next.js/Turbopack for its own chosen port, this indicates a more complex issue.
+
+This setup was found to be effective after extensive troubleshooting.
+
+

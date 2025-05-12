@@ -2,25 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Next.js: Server-side Debugging",
+      "name": "Next.js: Attach to Server (Simple)",
       "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev-wp"],
+      "request": "attach",
+      "port": 9230,
       "skipFiles": ["<node_internals>/**"],
       "sourceMaps": true,
-      "outFiles": [
-        "${workspaceFolder}/.next/server/**/*.js",
-        "${workspaceFolder}/.next/server/**/*.js.map",
-        "${workspaceFolder}/.next/cache/**/*.js",
-        "${workspaceFolder}/.next/types/**/*.ts",
-        "${workspaceFolder}/.turbo/turbopack/**/*.js",
-        "${workspaceFolder}/.next/build-manifest.json"
-      ],
-      "console": "integratedTerminal",
-      "env": {
-        "NODE_OPTIONS": "--inspect"
-      }
+      "restart": true
     },
     {
       "name": "Next.js: Client-side Debugging",
@@ -31,54 +19,6 @@
       "sourceMapPathOverrides": {
         "webpack://_N_E/*": "${webRoot}/*",
         "webpack://ajantic-v1/*": "${webRoot}/*"
-      }
-    },
-    {
-      "name": "Next.js: Full Stack",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "skipFiles": ["<node_internals>/**"],
-      "sourceMaps": true,
-      "outFiles": [
-        "${workspaceFolder}/.next/server/**/*.js",
-        "${workspaceFolder}/.next/server/**/*.js.map",
-        "${workspaceFolder}/.next/cache/**/*.js",
-        "${workspaceFolder}/.next/types/**/*.ts",
-        "${workspaceFolder}/.turbo/turbopack/**/*.js",
-        "${workspaceFolder}/.next/build-manifest.json"
-      ],
-      "console": "integratedTerminal",
-      "env": {
-        "NODE_OPTIONS": "--inspect"
-      },
-      "serverReadyAction": {
-        "pattern": "- Local:.+(https?://.+)",
-        "uriFormat": "%s",
-        "action": "debugWithChrome",
-        "webRoot": "${workspaceFolder}"
-      }
-    },
-    {
-      "name": "Next.js: Debug with Turbopack",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--turbo"],
-      "skipFiles": ["<node_internals>/**"],
-      "sourceMaps": true,
-      "outFiles": [
-        "${workspaceFolder}/.next/server/**/*.js",
-        "${workspaceFolder}/.next/server/**/*.js.map",
-        "${workspaceFolder}/.next/cache/**/*.js",
-        "${workspaceFolder}/.next/types/**/*.ts",
-        "${workspaceFolder}/.turbo/turbopack/**/*.js",
-        "${workspaceFolder}/.next/build-manifest.json"
-      ],
-      "console": "integratedTerminal",
-      "env": {
-        "NODE_OPTIONS": "--inspect"
       }
     }
   ]

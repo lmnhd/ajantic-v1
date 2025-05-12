@@ -5,6 +5,24 @@ import { logger } from "@/src/lib/logger";
 import { getCustomToolId, isCustomToolReference } from "./custom-tool-ref";
 import { ToolRegistryEntry } from "./ct-types";
 import { validateImplementationString } from "./ct-utils";
+import { getDecryptedCredential } from "@/src/lib/security/credentials";
+import { MissingCredentialError } from "@/src/lib/agent-tools/load-agent-tools";
+
+// Define a type for tool execution results
+type ToolExecutionResult = {
+  _isToolError: boolean;
+  success: boolean;
+  error?: string;
+  result?: string;
+};
+
+// Helper function to ensure string output
+function ensureStringOutput(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
 
 export const ToolFactory = {
   /**
@@ -60,19 +78,22 @@ export const ToolFactory = {
    * Creates an execute function for a tool
    */
   createExecuteFunction(toolEntry: ToolRegistryEntry) {
-    const validation = validateImplementationString(toolEntry.implementation);
+    const validation = validateImplementationString(toolEntry.implementation, toolEntry.implementationType);
     if (!validation.isValid) {
-        logger.error(`ToolFactory: Invalid implementation structure for tool ${toolEntry.name}`, { toolId: toolEntry.id, validationError: validation.error });
-        return async function invalidExecute(params: any) {
+      logger.error(`ToolFactory: Invalid implementation structure for tool ${toolEntry.name} (Type: ${toolEntry.implementationType})`, { 
+        toolId: toolEntry.id, 
+        validationError: validation.error 
+      });
+      return async function invalidExecute(): Promise<ToolExecutionResult> {
             return {
                  _isToolError: true,
                  success: false,
                  error: `Tool Configuration Error: ${validation.error}`
             };
-        }
+      };
     }
 
-    return async function execute(params: any) {
+    return async function execute(params: any): Promise<ToolExecutionResult> {
       try {
         logger.tool(`Executing tool ${toolEntry.name}`, {
           toolId: toolEntry.id,
@@ -85,9 +106,17 @@ export const ToolFactory = {
                 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                 const funcExecutor = new AsyncFunction('params', `return (${funcDefinition})(params);`);
 
-                return await funcExecutor(params);
+              const result = await funcExecutor(params);
+              return {
+                _isToolError: false,
+                success: true,
+                result: ensureStringOutput(result)
+              };
             } catch (execError) {
-                 logger.error(`ToolFactory: Error executing function implementation for ${toolEntry.name}`, { error: execError, toolId: toolEntry.id });
+              logger.error(`ToolFactory: Error executing function implementation for ${toolEntry.name}`, { 
+                error: execError, 
+                toolId: toolEntry.id 
+              });
                  return {
                      _isToolError: true,
                      success: false,
@@ -96,41 +125,162 @@ export const ToolFactory = {
             }
             
           case "api":
-            const endpoint = (toolEntry.implementation || "").startsWith("{") 
-              ? JSON.parse(toolEntry.implementation || "{}").endpoint || ""
-              : toolEntry.implementation || "";
-              
-            if (!endpoint) {
+            try {
+              // Parse API configuration
+              const apiConfig = (toolEntry.implementation || "").startsWith("{") 
+                ? JSON.parse(toolEntry.implementation || "{}")
+                : { endpoint: toolEntry.implementation || "" };
+                
+              if (!apiConfig.endpoint) {
               throw new Error("No API endpoint specified for tool");
             }
             
-            logger.tool(`Calling API for tool ${toolEntry.name}`, { toolId: toolEntry.id });
-            const response = await fetch(endpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(params)
-            });
-            const apiResult = await response.text();
-            logger.tool(`Tool ${toolEntry.name} API result status: ${response.status}`, { toolId: toolEntry.id });
+              // Get credentials if required
+              const headers: Record<string, string> = {
+                "Content-Type": "application/json"
+              };
 
-            if (!response.ok) throw new Error(`API call failed with status ${response.status}: ${apiResult}`);
-            
-             try {
-                if(response.headers.get('content-type')?.includes('application/json')) {
-                    return JSON.parse(apiResult);
+              if (Array.isArray(toolEntry.requiredCredentialNames) && toolEntry.requiredCredentialNames.length > 0) {
+                for (const cred of toolEntry.requiredCredentialNames as unknown as { name: string, label: string }[]) {
+                  if (cred && typeof cred.name === 'string') {
+                    const credentialValue = await getDecryptedCredential(toolEntry.userId, cred.name);
+                    if (!credentialValue) {
+                      throw new MissingCredentialError(cred.name);
+                    }
+                    if (apiConfig && apiConfig.authType === 'bearer') {
+                      headers['Authorization'] = `Bearer ${credentialValue}`;
+                    } else if (apiConfig && apiConfig.authType === 'basic') {
+                      headers['Authorization'] = `Basic ${Buffer.from(credentialValue).toString('base64')}`;
+                    } else if (apiConfig && apiConfig.authType === 'apiKey') {
+                      headers[apiConfig.apiKeyHeader || 'X-API-Key'] = credentialValue;
+                    }
+                  } else {
+                    logger.warn(`ToolFactory: Invalid credential object in requiredCredentialNames for tool ${toolEntry.name}`, { cred });
+                  }
                 }
-             } catch (parseError) {
-                 logger.warn(`ToolFactory: API for ${toolEntry.name} returned non-JSON response despite content-type`, { toolId: toolEntry.id, status: response.status });
-             }
-            return apiResult;
+              }
+
+              // Map parameters according to the API configuration
+              const mappedParams: Record<string, any> = {};
+              if (apiConfig.parameterMapping) {
+                const mapping = apiConfig.method === 'GET' 
+                  ? apiConfig.parameterMapping.query 
+                  : apiConfig.parameterMapping.body;
+
+                if (mapping) {
+                  Object.entries(mapping as Record<string, string>).forEach(([apiParam, toolParam]) => {
+                    if ((params as Record<string, any>)[toolParam] !== undefined) {
+                      mappedParams[apiParam] = (params as Record<string, any>)[toolParam];
+                    }
+                  });
+                }
+              } else {
+                // If no mapping provided, use params as is
+                Object.assign(mappedParams, params);
+              }
+
+              // Prepare request configuration
+              const requestConfig: RequestInit = {
+                method: apiConfig.method || 'POST',
+                headers,
+                body: apiConfig.method !== 'GET' ? JSON.stringify(mappedParams) : undefined,
+                signal: AbortSignal.timeout(apiConfig.timeout || 30000), // 30s default timeout
+              };
+
+              // Add query parameters for GET requests
+              if (apiConfig.method === 'GET' && Object.keys(mappedParams).length > 0) {
+                const queryParams = new URLSearchParams();
+                Object.entries(mappedParams).forEach(([key, value]) => {
+                  if (value !== undefined && value !== null) {
+                    queryParams.append(key, String(value));
+                  }
+                });
+                apiConfig.endpoint = `${apiConfig.endpoint}${apiConfig.endpoint.includes('?') ? '&' : '?'}${queryParams.toString()}`;
+              }
+
+              logger.tool(`Calling API for tool ${toolEntry.name}`, { 
+                toolId: toolEntry.id,
+                endpoint: apiConfig.endpoint,
+                method: requestConfig.method,
+                mappedParams
+              });
+
+              const response = await fetch(apiConfig.endpoint, requestConfig);
+              const contentType = response.headers.get('content-type');
+              let result: string;
+
+              // Handle different response types
+              if (contentType?.includes('application/json')) {
+                const jsonResult = await response.json();
+                result = JSON.stringify(jsonResult);
+              } else if (contentType?.includes('text/')) {
+                result = await response.text();
+              } else {
+                // For binary data, convert to base64
+                const buffer = await response.arrayBuffer();
+                result = Buffer.from(buffer).toString('base64');
+              }
+
+              // Handle error responses
+              if (!response.ok) {
+                const errorMessage = typeof result === 'string' && result.includes('message') 
+                  ? JSON.parse(result).message 
+                  : `API call failed with status ${response.status}`;
+                
+                throw new Error(errorMessage);
+              }
+
+              logger.tool(`Tool ${toolEntry.name} API call successful`, { 
+                toolId: toolEntry.id,
+                status: response.status
+              });
+
+              return {
+                _isToolError: false,
+                success: true,
+                result
+              };
+
+            } catch (error) {
+              if (error instanceof MissingCredentialError) {
+                logger.error(`Missing required credential for tool ${toolEntry.name}`, {
+                  toolId: toolEntry.id,
+                  credentialName: error.credentialName
+                });
+                return {
+                  _isToolError: true,
+                  success: false,
+                  error: `Missing required credential: ${error.credentialName}`
+                };
+              }
+
+              logger.error(`ToolFactory: Error executing API for ${toolEntry.name}`, {
+                error: error instanceof Error ? error.message : String(error),
+                toolId: toolEntry.id
+              });
+
+              return {
+                _isToolError: true,
+                success: false,
+                error: `API Error: ${error instanceof Error ? error.message : String(error)}`
+              };
+            }
             
           case "dynamic-script":
             logger.warn(`ToolFactory: Dynamic script execution not implemented for tool ${toolEntry.name}`, { toolId: toolEntry.id });
-            return `Dynamic script execution not yet implemented for tool ${toolEntry.name}`;
+            return {
+              _isToolError: true,
+              success: false,
+              error: `Dynamic script execution not yet implemented for tool ${toolEntry.name}`
+            };
             
           default:
             logger.error(`ToolFactory: Unsupported implementation type: ${toolEntry.implementationType}`, { toolId: toolEntry.id });
-            return `Unsupported tool implementation type: ${toolEntry.implementationType}`;
+            return {
+              _isToolError: true,
+              success: false,
+              error: `Unsupported tool implementation type: ${toolEntry.implementationType}`
+            };
         }
       } catch (outerError) {
         logger.error(`ToolFactory: Error executing tool ${toolEntry.name} (outer catch)`, {

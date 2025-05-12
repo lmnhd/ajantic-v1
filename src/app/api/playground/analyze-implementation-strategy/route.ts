@@ -1,8 +1,7 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { logger } from '@/src/lib/logger';
-import { consultationRequestSchema, ConsultationHistory, ConsultationRound } from './_types';
+import { apiConsultationRequestZodSchema, ConsultationHistory, ConsultationRound, ApiConsultationRequest as ConsultationRequestType } from './_types';
 import { analyzeAndVerifyStrategy, updateConsultationHistory } from './_core/consultant_logic';
-import { ToolRequest } from '@/src/lib/types';
 
 export async function POST(req: NextRequest) {
     try {
@@ -10,7 +9,7 @@ export async function POST(req: NextRequest) {
         logger.info("API Route: Received request to analyze implementation strategy", { userId: body?.userId, toolName: body?.currentToolRequest?.name });
 
         // 1. Validate Request Body
-        const validationResult = consultationRequestSchema.safeParse(body);
+        const validationResult = apiConsultationRequestZodSchema.safeParse(body);
         if (!validationResult.success) {
             logger.warn("API Route: Invalid request format", { errors: validationResult.error.flatten() });
             return NextResponse.json({ error: "Invalid request format.", details: validationResult.error.flatten() }, { status: 400 });
@@ -27,15 +26,13 @@ export async function POST(req: NextRequest) {
         // --- TODO: Add User Authorization Check if necessary ---
         // Ensure the requesting user (e.g., from session) matches `userId` or has permissions
 
-        // 2. Explicitly map/cast parsed data to ensure compatibility with ToolRequest
-        //    Focus on the 'examples' field identified by the error message.
-        const toolRequestForAnalysis: ToolRequest = {
+        // 2. Use the parsedToolRequest which is already of type ConsultationRequest['currentToolRequest']
+        // The mapping for examples is a safeguard for the output optionality issue.
+        const toolRequestForConsultation: ConsultationRequestType['currentToolRequest'] = {
             ...parsedToolRequest,
-            // Ensure the examples array structure matches ToolRequest['examples']
-            // Specifically, ensure 'output' is present as required by ToolRequest.
-            examples: parsedToolRequest.examples?.map(ex => ({
+            examples: parsedToolRequest.examples?.map((ex: { input: Record<string, any>; output?: any; }) => ({
                 input: ex.input,
-                output: ex.output ?? null // Default 'output' to null if it's undefined in parsed data
+                output: ex.output ?? null // Default output if undefined, to satisfy stricter interpretations
             })),
         };
 
@@ -45,7 +42,7 @@ export async function POST(req: NextRequest) {
             finalVerificationResult,
             attemptHistory
         } = await analyzeAndVerifyStrategy(
-            toolRequestForAnalysis,
+            toolRequestForConsultation,
             initialHistory,
             newStrategyModifications,
             modelArgs
@@ -57,11 +54,11 @@ export async function POST(req: NextRequest) {
 
         // *** Ensure latestRoundResult exists before returning (edge case safeguard) ***
         if (!latestRoundResult) {
-             logger.error("API Route: No latest round result found after analysis.", { userId, toolName: toolRequestForAnalysis.name });
+             logger.error("API Route: No latest round result found after analysis.", { userId, toolName: toolRequestForConsultation.name });
              return NextResponse.json({ error: "Internal server error: Analysis did not produce a result." }, { status: 500 });
         }
 
-        logger.info("API Route: Successfully analyzed implementation strategy", { toolName: toolRequestForAnalysis.name, userId });
+        logger.info("API Route: Successfully analyzed implementation strategy", { toolName: toolRequestForConsultation.name, userId });
 
         // 5. Return Response using final results
         return NextResponse.json({
