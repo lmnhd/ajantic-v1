@@ -7,6 +7,28 @@ import { ToolRegistryEntry } from "./ct-types";
 import { validateImplementationString } from "./ct-utils";
 import { getDecryptedCredential } from "@/src/lib/security/credentials";
 import { MissingCredentialError } from "@/src/lib/agent-tools/load-agent-tools";
+// Import the Zod schema for scraping config to parse the implementation string
+import { scrapingToolImplementationConfigSchema } from '../custom-scraper/validator';
+// Import the definitive TypeScript interfaces from types.ts
+import { ScrapingToolImplementationConfig, DataExtractionChainStep } from '../custom-scraper/types';
+// Import the actual execution function
+import { executeScrapingTool, ScrapingToolOutput } from '../custom-scraper/execution_logic';
+
+// Mock/Placeholder for scraping execution logic - REPLACE LATER
+async function executeScrapingTool_placeholder(
+    config: ScrapingToolImplementationConfig,
+    args: any,
+    userId: string, // userId needed for credential fetching
+    toolName: string
+): Promise<any> {
+    logger.warn(`SCRAPING_PLACEHOLDER: Tool "${toolName}" called with type 'scraping'. Execution logic not yet implemented.`, { config, args, userId });
+    return {
+        _isToolError: true,
+        success: false,
+        error: `Scraping tool type for "${toolName}" is configured, but runtime execution is not yet implemented.`,
+        details: { config, args }
+    };
+}
 
 // Define a type for tool execution results
 type ToolExecutionResult = {
@@ -14,6 +36,8 @@ type ToolExecutionResult = {
   success: boolean;
   error?: string;
   result?: string;
+  // Adding a field for potential structured data for scraping tools, though final output is string
+  structuredResult?: Record<string, any> | Array<any>;
 };
 
 // Helper function to ensure string output
@@ -97,6 +121,7 @@ export const ToolFactory = {
       try {
         logger.tool(`Executing tool ${toolEntry.name}`, {
           toolId: toolEntry.id,
+          type: toolEntry.implementationType, // Log the type
         });
         
         switch (toolEntry.implementationType) {
@@ -208,17 +233,21 @@ export const ToolFactory = {
               const response = await fetch(apiConfig.endpoint, requestConfig);
               const contentType = response.headers.get('content-type');
               let result: string;
+              let structuredResultForLog: any = null;
 
               // Handle different response types
               if (contentType?.includes('application/json')) {
                 const jsonResult = await response.json();
+                structuredResultForLog = jsonResult;
                 result = JSON.stringify(jsonResult);
               } else if (contentType?.includes('text/')) {
                 result = await response.text();
+                structuredResultForLog = result;
               } else {
                 // For binary data, convert to base64
                 const buffer = await response.arrayBuffer();
                 result = Buffer.from(buffer).toString('base64');
+                structuredResultForLog = `Binary data (length: ${buffer.byteLength}, type: ${contentType || 'unknown'}) base64 encoded.`;
               }
 
               // Handle error responses
@@ -238,7 +267,8 @@ export const ToolFactory = {
               return {
                 _isToolError: false,
                 success: true,
-                result
+                result,
+                structuredResult: structuredResultForLog // For potential use/logging
               };
 
             } catch (error) {
@@ -263,6 +293,91 @@ export const ToolFactory = {
                 _isToolError: true,
                 success: false,
                 error: `API Error: ${error instanceof Error ? error.message : String(error)}`
+              };
+            }
+            
+          case "scraping":
+            try {
+              if (!toolEntry.implementation) { // Should be caught by validateImplementationString
+                  throw new Error("Scraping tool implementation configuration is missing.");
+              }
+              // Parse the JSON configuration string for scraping
+              // This was already validated by validateImplementationString, but re-parsing is needed.
+              const parsedConfig = JSON.parse(toolEntry.implementation);
+              
+              const scrapingConfig: ScrapingToolImplementationConfig = {
+                implementationType: parsedConfig.implementationType, 
+                baseDomain: parsedConfig.baseDomain,
+                toolPurposeDescription: parsedConfig.toolPurposeDescription,
+                sourceFinderConfig: parsedConfig.sourceFinderConfig,
+                authConfig: { // Transform requiredCredentialNames here
+                  ...parsedConfig.authConfig,
+                  requiredCredentialNames: 
+                    (Array.isArray(parsedConfig.authConfig?.requiredCredentialNames) && 
+                     parsedConfig.authConfig.requiredCredentialNames.every((item: any) => typeof item === 'object' && item !== null && 'name' in item))
+                    ? parsedConfig.authConfig.requiredCredentialNames.map((cred: { name: string, label?: string }) => cred.name)
+                    : (parsedConfig.authConfig?.requiredCredentialNames || []), // Keep as is if already string[] or undefined/empty
+                },
+                scrapingMethodsConfig: parsedConfig.scrapingMethodsConfig,
+                dataExtractionChain: Array.isArray(parsedConfig.dataExtractionChain) 
+                                     ? parsedConfig.dataExtractionChain as DataExtractionChainStep[] 
+                                     : [] as DataExtractionChainStep[], 
+              };
+
+              if (scrapingConfig.implementationType !== 'scraping') {
+                  throw new Error("Implementation type mismatch after parsing scraping config.");
+              }
+
+              logger.info(`ToolFactory: Preparing to execute scraping tool '${toolEntry.name}'`, {
+                  toolId: toolEntry.id,
+                  baseDomain: scrapingConfig.baseDomain
+              });
+
+              // Call the actual scraping execution logic with correct arguments and order
+              const scrapingToolOutput: ScrapingToolOutput = await executeScrapingTool(
+                  toolEntry.userId, // clerkId (userId)
+                  scrapingConfig,   // config
+                  params            // input (runtime arguments from agent)
+              );
+
+              if (scrapingToolOutput.errors && scrapingToolOutput.errors.length > 0) {
+                let detailedErrorMessage = `Error executing scraping tool '${toolEntry.name}':\n`;
+                if (scrapingToolOutput.sourceUrl) {
+                    detailedErrorMessage += `Attempted Source URL: ${scrapingToolOutput.sourceUrl}\n`;
+                }
+                detailedErrorMessage += `Details:\n${scrapingToolOutput.errors.map(e => `- ${e}`).join('\n')}`;
+                
+                logger.error(`ToolFactory: Scraping tool '${toolEntry.name}' execution returned errors.`, {
+                    error: detailedErrorMessage, // Log the full detailed message
+                    // sourceUrl is already in detailedErrorMessage if present
+                });
+                return {
+                    _isToolError: true,
+                    success: false,
+                    error: detailedErrorMessage,
+                };
+              }
+
+              logger.info(`ToolFactory: Scraping tool '${toolEntry.name}' executed successfully.`, {
+                sourceUrl: scrapingToolOutput.sourceUrl
+              });
+              return {
+                _isToolError: false,
+                success: true,
+                result: ensureStringOutput(scrapingToolOutput.scrapedData), // Ensure final output is string
+                // structuredResult could be scrapingToolOutput if we want to log more, but output to agent is string.
+              };
+
+            } catch (error) {
+                logger.error(`ToolFactory: Error setting up or executing scraping tool ${toolEntry.name}`, {
+                    error: error instanceof Error ? error.message : String(error),
+                    toolId: toolEntry.id
+                });
+                return {
+                    _isToolError: true,
+                    success: false,
+                    // Consistent detailed error format for unexpected errors too
+                    error: `Unexpected error in scraping tool '${toolEntry.name}': ${error instanceof Error ? error.message : String(error)}`
               };
             }
             
@@ -313,8 +428,12 @@ export const ToolFactory = {
               logger.error(`Failed to parse parameters JSON for tool ${toolEntry.name} (ID: ${toolEntry.id})`, { error: e, paramsString: toolEntry.parameters });
               parametersArray = [];
           }
-      } else {
-           logger.warn(`Parameters field for tool ${toolEntry.name} (ID: ${toolEntry.id}) is missing or not a string. Assuming no parameters.`, { parameters: toolEntry.parameters });
+      } else if (toolEntry.parameters && Array.isArray(toolEntry.parameters)) {
+          // Handle case where parameters might already be an array (e.g., from direct creation test or future change)
+          parametersArray = toolEntry.parameters;
+      }
+      else {
+           logger.warn(`Parameters field for tool ${toolEntry.name} (ID: ${toolEntry.id}) is missing or not a string/array. Assuming no parameters.`, { parameters: toolEntry.parameters });
            parametersArray = [];
       }
       
@@ -342,12 +461,19 @@ export const ToolFactory = {
    */
   createSerializableTool(toolEntry: ToolRegistryEntry): Record<string, any> {
     try {
+      let paramsArray: any[] = [];
+      if (typeof toolEntry.parameters === 'string') {
+          try { paramsArray = JSON.parse(toolEntry.parameters); } catch { /* ignore */ }
+      } else if (Array.isArray(toolEntry.parameters)) {
+          paramsArray = toolEntry.parameters;
+      }
+
       return {
         name: toolEntry.name,
         description: toolEntry.description,
         parameterInfo: {
           type: "object",
-          properties: JSON.parse(toolEntry.parameters).reduce((acc: any, param: any) => {
+          properties: paramsArray.reduce((acc: any, param: any) => {
             acc[param.name] = {
               type: param.type,
               description: param.description
@@ -379,8 +505,8 @@ export const ToolFactory = {
     
     for (const entry of toolEntries) {
       try {
-        const tool = this.buildTool(entry);
-        Object.assign(tools, tool);
+        const toolInstance = this.buildTool(entry); // Renamed 'tool' to 'toolInstance' to avoid conflict
+        Object.assign(tools, toolInstance);
       } catch (error) {
         logger.error(`Error building tool ${entry.name}`, { error });
       }
@@ -405,8 +531,8 @@ export const ToolFactory = {
         const toolEntry = await ToolRegistry.getToolById(toolId);
         
         if (toolEntry) {
-          const tool = this.buildTool(toolEntry);
-          Object.assign(tools, tool);
+          const toolInstance = this.buildTool(toolEntry); // Renamed 'tool' to 'toolInstance'
+          Object.assign(tools, toolInstance);
         }
       } catch (error) {
         logger.error(`Error loading tool from reference ${ref}`, { error });

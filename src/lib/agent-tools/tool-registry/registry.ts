@@ -19,6 +19,7 @@ export const ToolRegistry = {
    * Registers a custom tool for a specific user.
    * @param userId The ID of the user owning the tool.
    * @param metadata Optional metadata (agentId is no longer required).
+   * @param requiredCredentialNames Array of {name: string, label: string} for credentials.
    * @returns A tool reference in CUSTOM_TOOL:id format.
    */
   async registerTool(
@@ -26,11 +27,13 @@ export const ToolRegistry = {
     name: string,
     description: string,
     parameters: any[],
-    implementation: string,
+    implementation: string | object,
     implementationType: string = "function",
     metadata: { [key: string]: any } = {},
-    acceptedStrategyJson?: string | null
+    acceptedStrategyJson?: string | null,
+    requiredCredentialNames?: Array<{ name: string; label: string }> | null // Temporarily commented out for arity
   ): Promise<string> {
+    // When ct-actions.ts is updated, uncomment the above and the line below
     return CUSTOM_TOOL_registerTool(
       userId,
       name,
@@ -39,7 +42,8 @@ export const ToolRegistry = {
       implementation,
       implementationType,
       metadata,
-      acceptedStrategyJson
+      acceptedStrategyJson,
+      requiredCredentialNames // Pass when ct-actions.ts is updated
     );
   },
   
@@ -54,6 +58,7 @@ export const ToolRegistry = {
   
   /**
    * Updates an existing tool. User ID cannot be changed.
+   * @param requiredCredentialNames Array of {name: string, label: string} for credentials.
    */
   async updateTool(
     id: string,
@@ -61,12 +66,14 @@ export const ToolRegistry = {
       name?: string;
       description?: string;
       parameters?: any[];
-      implementation?: string;
+      implementation?: string | object;
       implementationType?: string;
       metadata?: { [key: string]: any };
       acceptedStrategyJson?: string | null;
+      requiredCredentialNames?: Array<{ name: string; label: string }> | null; // This is correct
     }
   ): Promise<string> {
+    // Ensure CUSTOM_TOOL_updateTool in ct-actions.ts handles updates.requiredCredentialNames
     return CUSTOM_TOOL_updateTool(id, updates);
   },
   

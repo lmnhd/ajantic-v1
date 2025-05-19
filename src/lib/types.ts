@@ -30,6 +30,8 @@ import { OrchestrationType2 } from "./orchestration/types/base";
 import { Message as VercelAIMessage } from 'ai';
 import { StrategyAnalysis } from '../app/api/playground/analyze-implementation-strategy/_types';
 
+export type { StrategyAnalysis };
+
 export type Top100Songs = {
   title: string;
   artist: string;
@@ -307,6 +309,7 @@ export interface ToolRequest {
     default?: any;
   }[];
   expectedOutput: string; // Description of what the tool returns
+  
 
   // Optional properties for richer tool generation
   purpose?: string; // Detailed purpose of the tool

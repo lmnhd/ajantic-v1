@@ -9,8 +9,7 @@ import { UTILS_getModelArgsByName, UTILS_getModelsJSON, MODEL_JSON } from '@/src
 import { summarizeHistory, mapProviderStringToEnum } from './helpers'; // Import helpers
 import { TOOLS_performBasicVerification } from './verification_logic';
 import { LLM_generateStrategySuggestion } from './llm_logic';
-
-
+import { quickSiteAnalysis } from "./utils/site_analyzer";
 
 // Define the Zod schema for the expected LLM output (matching part of AnalysisResult type)
 const analysisResultSchema = z.object({
@@ -64,6 +63,16 @@ export async function runAnalysisPhase(
     const currentIdentifiers = getKeyIdentifiers(toolRequest);
     let extractedApiEndpointFromDetailedSearch: string | null = null;
     let extractedApiUrlBasic: string | null = null;
+
+    // Site analysis results for scraping considerations
+    let siteAnalysisResults: Awaited<ReturnType<typeof quickSiteAnalysis>> = { isLikelyBlockPage: false };
+    let siteAnalysisNote = "Site Quick Analysis: Not performed or no target URL.";
+
+    if (currentIdentifiers.targetUrl) {
+        siteAnalysisResults = await quickSiteAnalysis(currentIdentifiers.targetUrl);
+        siteAnalysisNote = `Site Quick Analysis (${currentIdentifiers.targetUrl}): Block page likely: ${siteAnalysisResults.isLikelyBlockPage}${siteAnalysisResults.blockReason ? ` (${siteAnalysisResults.blockReason})` : ''}. Auth form detected: ${!!siteAnalysisResults.authDetected}. Suggested method hint: ${siteAnalysisResults.suggestedScrapingMethodHint || 'N/A'}.`;
+        logger.info("Analysis Logic: Quick site analysis results", siteAnalysisResults);
+    }
 
     // **** 0. Check History for Reusable Preliminary Findings ****
     if (history && history.length > 0) {
@@ -188,7 +197,7 @@ export async function runAnalysisPhase(
                 }
             }
 
-            const findingsSummary = `Summary of Basic Research:\n- ${apiDocsNote}\n- ${scrapingNote}`;
+            const findingsSummary = `Summary of Basic Research:\n- ${apiDocsNote}\n- ${scrapingNote}\n- ${siteAnalysisNote}`;
             const apiDetailsBasic = `Basic API Documentation Details (from Perplexity):\n${apiDocsFullResult || "No detailed results for API documentation."}\n${extractedApiUrlBasic ? `Potentially relevant URL from basic search: ${extractedApiUrlBasic}` : ""}`.trim();
             const scrapingDetailsText = `Scraping Analysis Details for ${targetUrl || 'N/A'} (from Perplexity):\n${scrapingFullResult || "No detailed results for scraping analysis."}`.trim();
             
@@ -206,17 +215,23 @@ ${researchDepth === ResearchDepth.DETAILED ? `\n--- Detailed API Endpoint Resear
 
         } catch (error) {
             logger.error("Analysis Logic: Error during preliminary Perplexity research block", { error: error instanceof Error ? error.message : String(error) });
-            preliminaryFindings = `Error during preliminary research: ${error instanceof Error ? error.message : String(error)}`;
+            preliminaryFindings = `Error during preliminary research: ${error instanceof Error ? error.message : String(error)}. ${siteAnalysisNote}`;
         }
     } else {
-        logger.debug("Analysis Logic: Skipping new Perplexity research, using stored findings.", {
+        preliminaryFindings += `\n${siteAnalysisNote}`;
+        logger.debug("Analysis Logic: Skipping new Perplexity research, using stored findings and appending current site analysis.", {
             reusedFindingsContent: preliminaryFindings.substring(0, 200) + "...",
             reusedExtractedEndpoint: extractedApiEndpointFromDetailedSearch
         });
     }
 
     const systemPrompt = `
-You are an expert Software Implementation Consultant. Your task is to analyze a tool request and recommend the most viable implementation strategy: using an existing API ('api') or writing a custom function ('function'). Prioritize APIs if available and suitable. Base your recommendation on the tool's purpose, parameters, expected output, previous consultation history, and the user's latest refinement requests.
+You are an expert Software Implementation Consultant. Your task is to analyze a tool request and recommend the most viable implementation strategy:
+1.  'api': Use an existing public or private API.
+2.  'function': Write a custom JavaScript/TypeScript function (e.g., for complex logic, calculations, or simple non-API interactions).
+3.  'scraping': Implement a web scraping solution (e.g., for sites without APIs, requiring login, or JS rendering).
+
+Prioritize APIs if available and suitable. Base your recommendation on the tool's purpose, inputs, expected output, previous consultation history, user's latest refinement requests, and crucially, the <preliminary_research_findings> (including any 'Site Quick Analysis' notes).
 
 <tool_request>
 Name: ${toolRequest.name}
@@ -245,22 +260,33 @@ ${modifications.length > 0 ? modifications.map(m => `- ${m}`).join('\n') : 'None
 </user_refinement_requests>
 
 <instructions>
-1.  **Analyze Feasibility:** Based on the tool request, preliminary research (pay close attention to any 'Detailed API Endpoint Research Log' or extracted endpoints like '${extractedApiUrlBasic ? extractedApiUrlBasic : 'any URL found in research'}' mentioned therein), **past records**, and history, determine the best strategy ('api' or 'function', or 'unknown' if truly unclear, 'error' if analysis itself fails).
-    *   API First: Prefer API if research, records, or common knowledge suggests one exists. If a specific endpoint was found in detailed research ('extractedApiEndpointFromDetailedSearch' in the logs) or a general API documentation URL was found (like '${extractedApiUrlBasic ? extractedApiUrlBasic : 'any relevant URL'}'), prioritize its evaluation.
-    *   Function: Recommend 'function' for scraping (heed research warnings), custom logic, etc.
+1.  **Analyze Feasibility & Choose Type:** Based on ALL provided information, determine the best strategy ('api', 'function', 'scraping', 'unknown', or 'error').
+    *   API: Prefer if research indicates a usable API (look for '${extractedApiUrlBasic || 'any API URL'}' or '${extractedApiEndpointFromDetailedSearch || 'specific API endpoint'}').
+    *   Function: For custom logic not involving web interaction, or very simple, static web content.
+    *   Scraping: If the goal is to extract data from a website, especially if research (Site Quick Analysis or Perplexity) indicates:
+        *   No obvious API.
+        *   The site requires JavaScript rendering (e.g., Cloudflare hint, or knowledge of SPAs).
+        *   Login is required (e.g., 'authDetected' in Site Quick Analysis).
+        *   Consider 'scrapingMethodHint' from Site Quick Analysis.
 2.  **Provide Strategy Details:** Explain your recommendation.
-    *   **For 'api' type:** If a potential API endpoint URL (e.g., a base URL, a specific endpoint from detailed search, or a documentation link like '${extractedApiUrlBasic ? extractedApiUrlBasic : 'any promising URL from research'}') was found in \`<preliminary_research_findings>\`, you **MUST** include that **exact URL** directly and prominently in your \`strategyDetails\` text. If multiple are found, pick the most relevant one. Also, briefly describe how to find specific endpoints if only a base/docs URL is available.
-    *   For 'function' type: Outline the core logic.
-3.  **Identify Credentials:** If recommending 'api', specify credential type and a generic name (e.g., 'SERVICE_API_KEY'). Set to null/omit if none or type is 'function'.
-4.  **List Warnings:** Mention potential blockers, difficulties (e.g., "No known public API", "Website uses heavy JS, recommend Firecrawl helper", "API requires paid plan"), or reasons for ruling out alternatives. Include warnings from research AND relevant past records.
-5.  **Consider History & Modifications:** Adapt based on previous rounds and user's latest requests.
-6.  **Output Format:** Respond ONLY with a valid JSON object matching the required schema.
+    *   For 'api': Include the **exact URL** from research if found. Describe parameter mapping.
+    *   For 'function': Outline core logic.
+    *   For 'scraping': State the target (likely \`currentIdentifiers.targetUrl\`). Suggest a primary scraping method ('firecrawl', 'visual', 'directHttpFetch') based on research (e.g., if 'Cloudflare or JS challenge' hint from quick analysis, lean towards 'firecrawl' or 'visual'; if 'CAPTCHA', lean 'visual'). Mention if Puppeteer might be needed for authentication.
+3.  **Identify Credentials:**
+    *   For 'api': Credential name (e.g., 'SERVICE_API_KEY').
+    *   For 'scraping' with auth: Suggest generic credential names (e.g., 'TARGETSITE_USERNAME', 'TARGETSITE_PASSWORD').
+4.  **List Warnings:** Mention blockers, difficulties (e.g., "No public API", "Scraping may be brittle", "API requires paid plan", "Site uses heavy JS").
+5.  **Populate Scraping Hints (if type is 'scraping'):**
+    *   \`suggestedBaseDomain\`: Extract from \`currentIdentifiers.targetUrl\` or tool context.
+    *   \`scrapingMethodHint\`: Based on research (e.g., 'firecrawl' if JS challenge, 'visual' if CAPTCHA or highly dynamic).
+    *   \`authRequiresPuppeteer\`: Set to true if login seems to require form interaction.
+6.  **Output Format:** Respond ONLY with a valid JSON object matching the schema.
 </instructions>
 
 <output_schema>
 ${JSON.stringify(analysisResultSchema.shape, null, 2)}
 </output_schema>
-Generate ONLY the JSON object containing the analysis result.
+Generate ONLY the JSON object.
 `;
 
     let analysisModelArgs: ModelArgs;
@@ -335,6 +361,7 @@ Generate ONLY the JSON object containing the analysis result.
     const mapStringToRecommendedType = (typeStr: string | undefined): RecommendedImplementationType => {
         if (typeStr === "api") return RecommendedImplementationType.API;
         if (typeStr === "function") return RecommendedImplementationType.FUNCTION;
+        if (typeStr === "scraping") return RecommendedImplementationType.SCRAPING;
         if (typeStr === "unknown") return RecommendedImplementationType.UNKNOWN;
         if (typeStr === "error") return RecommendedImplementationType.ERROR;
         return RecommendedImplementationType.UNKNOWN; // Default fallback
@@ -359,6 +386,9 @@ Generate ONLY the JSON object containing the analysis result.
         preliminaryFindings: preliminaryFindings,
         preliminaryResearchFor: currentIdentifiers,
         warnings: llmSuggestionResponse.warnings || structuredAnalysisFromLLM.warnings || [],
+        suggestedBaseDomain: llmRecommendedType === RecommendedImplementationType.SCRAPING ? (llmSuggestionResponse.suggestedBaseDomain || currentIdentifiers.targetUrl) : undefined,
+        scrapingMethodHint: llmRecommendedType === RecommendedImplementationType.SCRAPING ? (llmSuggestionResponse.scrapingMethodHint || siteAnalysisResults.suggestedScrapingMethodHint) : undefined,
+        authRequiresPuppeteer: llmRecommendedType === RecommendedImplementationType.SCRAPING ? (llmSuggestionResponse.authRequiresPuppeteer || siteAnalysisResults.authDetected) : undefined,
     };
     
     logger.info("Analysis Logic: Constructed analysisResultData", { type: analysisResultData.recommendedType, extractedEndpoint: analysisResultData.extractedApiEndpoint });

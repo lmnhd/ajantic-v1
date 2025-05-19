@@ -58,7 +58,7 @@ const toolUpdateRequestSchema = z.object({
     additionalContext: z.string().optional(),
     modelArgs: modelArgsSchema,
     implementation: z.string().optional(),
-    implementationType: z.enum(["api", "function"]).optional(),
+    implementationType: z.enum(["api", "function", "scraping"]).optional(),
     requiredCredentialNames: z.array(z.object({
         name: z.string().min(1),
         label: z.string().min(1)

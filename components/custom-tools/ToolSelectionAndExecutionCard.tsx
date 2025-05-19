@@ -185,7 +185,7 @@ export default function ToolSelectionAndExecutionCard({
         {execError && (
           <div className="text-red-400 border border-red-900 bg-red-900/25 p-3 rounded-lg whitespace-pre-wrap w-full">
             <strong className="font-semibold">Error:</strong>
-            <pre className="mt-1 text-sm">{execError}</pre>
+            <pre className="mt-1 text-sm whitespace-pre-wrap break-words">{execError}</pre>
           </div>
         )}
         {result && (

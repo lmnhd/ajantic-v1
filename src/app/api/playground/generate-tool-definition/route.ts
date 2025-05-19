@@ -4,7 +4,7 @@ import { CORE_generateCustomToolDefinition } from '@/src/lib/agent-tools/auto-ge
 import { ToolRequest } from '@/src/lib/types'; // Assuming ToolRequest is defined here
 import { z } from 'zod';
 import { ModelProviderEnum, ModelArgs } from "@/src/lib/types"; // Import ModelArgs related types
-import { RecommendedImplementationType, PreliminaryResearchIdentifiers as PreliminaryResearchIdentifiersInterface, AnalysisResult } from '@/src/app/api/playground/analyze-implementation-strategy/_types';
+import { RecommendedImplementationType, PreliminaryResearchIdentifiers as PreliminaryResearchIdentifiersInterface, AnalysisResult, analysisResultSchemaInternal as strategyAnalysisZodSchema } from '@/src/app/api/playground/analyze-implementation-strategy/_types';
 
 // --- Add Helper --- 
 function mapStringToProviderEnum(providerString: string): ModelProviderEnum | undefined {
@@ -75,108 +75,54 @@ const toolRequestSchema = z.object({
     modificationRequests: z.array(z.string()).optional(),
     implementation: z.string().optional(),
     modelArgs: modelArgsSchema,
-    acceptedStrategy: analysisResultAlignedSchema.optional().nullable(), // Use the new aligned schema
+    acceptedStrategy: strategyAnalysisZodSchema.optional().nullable(),
 });
 
+// Combined schema for the entire request body
+const generateDefinitionRequestSchema = z.object({
+    toolRequest: toolRequestSchema,
+    modelArgs: modelArgsSchema,
+});
 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        // Log userId if present for context
-        logger.info("API: Received request to generate tool definition", { 
-            userId: body?.userId, 
-            toolName: body?.name,
-            hasModelArgs: !!body?.modelArgs,
-            hasAcceptedStrategy: !!body?.acceptedStrategy
+        logger.info("API: Received request to generate tool definition & implementation", { toolName: body?.toolRequest?.name });
+
+        const validationResult = generateDefinitionRequestSchema.safeParse(body);
+
+        if (!validationResult.success) {
+            logger.warn("API: Invalid request format for generate tool definition", { errors: validationResult.error.flatten() });
+            return NextResponse.json({ error: "Invalid request format.", details: validationResult.error.flatten() }, { status: 400 });
+        }
+
+        const { toolRequest, modelArgs } = validationResult.data;
+
+        // --- Crucial: Pass acceptedStrategy to CORE_generateCustomToolDefinition ---
+        // The toolRequest from the client payload now includes acceptedStrategy (if provided by client)
+        // and its structure is validated by strategyAnalysisZodSchema.
+        const refinedDefinition = await CORE_generateCustomToolDefinition(
+            toolRequest as ToolRequest, // This toolRequest object now contains the (optional) acceptedStrategy
+            modelArgs as ModelArgs,
+            toolRequest.acceptedStrategy // Explicitly passing here for clarity, though it's part of toolRequest
+        );
+
+        // Ensure refinedDefinition is not null or undefined before sending
+        if (!refinedDefinition) {
+            logger.error("API: CORE_generateCustomToolDefinition returned undefined/null", { toolName: toolRequest.name });
+            return NextResponse.json({ error: "Failed to generate tool definition: Core function returned empty." }, { status: 500 });
+        }
+        
+        logger.info("API: Successfully generated tool definition & implementation", { toolName: refinedDefinition.name, type: refinedDefinition.implementationType });
+        
+        return NextResponse.json({
+            success: true,
+            definition: refinedDefinition
         });
 
-        const validationResult = toolRequestSchema.safeParse(body);
-        if (!validationResult.success) {
-            logger.warn("API: Invalid request format for tool definition generation", { 
-                errors: validationResult.error.flatten(),
-                receivedBody: {
-                    name: body?.name,
-                    description: body?.description,
-                    inputsCount: body?.inputs?.length,
-                    hasExpectedOutput: !!body?.expectedOutput,
-                    hasModelArgs: !!body?.modelArgs,
-                    modelArgsProvider: body?.modelArgs?.provider,
-                    hasAcceptedStrategy: !!body?.acceptedStrategy
-                }
-            });
-            return NextResponse.json({ 
-                error: "Invalid request format.", 
-                details: validationResult.error.flatten(),
-                receivedBody: {
-                    name: body?.name,
-                    description: body?.description,
-                    inputsCount: body?.inputs?.length,
-                    hasExpectedOutput: !!body?.expectedOutput,
-                    hasModelArgs: !!body?.modelArgs,
-                    modelArgsProvider: body?.modelArgs?.provider,
-                    hasAcceptedStrategy: !!body?.acceptedStrategy
-                }
-            }, { status: 400 });
-        }
-
-        const validatedData = validationResult.data;
-        const userId = validatedData.userId; // Extracted but not used by the core function here
-        
-        let acceptedStrategyForCore: AnalysisResult | undefined | null = validatedData.acceptedStrategy === null 
-            ? null 
-            : (validatedData.acceptedStrategy ? validatedData.acceptedStrategy as AnalysisResult : undefined);
-
-        // Prepare modelArgs separately, converting provider string to enum
-        const validatedModelArgsData = validatedData.modelArgs;
-        let modelArgsForCore: ModelArgs;
-        if (validatedModelArgsData && validatedModelArgsData.provider) {
-            const providerEnum = mapStringToProviderEnum(validatedModelArgsData.provider);
-            if (providerEnum) {
-                modelArgsForCore = {
-                    provider: providerEnum,
-                    modelName: validatedModelArgsData.modelName,
-                    temperature: validatedModelArgsData.temperature ?? 0.7,
-                    maxInputTokens: validatedModelArgsData.maxTokens,
-                    maxOutputTokens: validatedModelArgsData.maxTokens,
-                    topP: validatedModelArgsData.topP
-                };
-                if (validatedModelArgsData.topP !== undefined) modelArgsForCore.topP = validatedModelArgsData.topP;
-            } else {
-                console.warn(`Invalid provider string '${validatedModelArgsData.provider}' received, using default.`);
-                modelArgsForCore = { modelName: "gpt-4o", provider: ModelProviderEnum.OPENAI, temperature: 0.7 }; // Default
-            }
-        } else {
-            modelArgsForCore = { modelName: "gpt-4o", provider: ModelProviderEnum.OPENAI, temperature: 0.7 }; // Default
-        }
-
-        // Construct the ToolRequest object for the core function
-        // Ensure all required fields for ToolRequest are included from validatedData
-        const toolRequestForCore: ToolRequest = {
-            name: validatedData.name,
-            description: validatedData.description,
-            purpose: validatedData.purpose,
-            inputs: validatedData.inputs,
-            expectedOutput: validatedData.expectedOutput,
-            category: validatedData.category,
-            additionalContext: validatedData.additionalContext,
-            examples: validatedData.examples?.map(ex => ({
-                input: ex.input,
-                output: ex.output ?? null // Provide default if somehow missing to satisfy ToolRequest type
-            })) || undefined,
-            modificationRequests: validatedData.modificationRequests,
-            implementation: validatedData.implementation,
-        };
-
-        // Call the core function with the correctly typed arguments
-        const generatedDefinition = await CORE_generateCustomToolDefinition(toolRequestForCore, modelArgsForCore, acceptedStrategyForCore);
-
-        logger.info("API: Successfully generated/modified tool definition", { toolName: generatedDefinition.name, requestingUserId: userId });
-
-        // Return the full generated definition, including the implementation
-        return NextResponse.json({ definition: generatedDefinition });
-
     } catch (error) {
-        logger.error("API Error generating tool definition:", { error: error instanceof Error ? error.message : String(error) });
-        return NextResponse.json({ error: "Internal server error generating tool definition." }, { status: 500 });
+        const toolName = (await req.json().catch(() => ({})))?.toolRequest?.name || "Unknown tool";
+        logger.error(`API Error generating tool definition for ${toolName}:`, { error: error instanceof Error ? error.message : String(error) });
+        return NextResponse.json({ error: `Failed to generate tool definition: ${error instanceof Error ? error.message : "Unknown error"}` }, { status: 500 });
     }
 } 

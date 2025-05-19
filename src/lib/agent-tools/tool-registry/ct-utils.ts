@@ -1,6 +1,8 @@
 // src/lib/agent-tools/tool-registry/ct-utils.ts
 import { logger } from '@/src/lib/logger';
 import { z } from 'zod';
+// Import the new scraping schema validator
+import { scrapingToolImplementationConfigSchema } from '../custom-scraper/validator';
 
 // Zod schema for API implementation configuration
 const apiImplementationConfigSchema = z.object({
@@ -21,7 +23,7 @@ const apiImplementationConfigSchema = z.object({
  * Validates the structure of a custom tool implementation string based on its type.
  *
  * @param implementation The implementation code string or JSON configuration string.
- * @param type The type of implementation (e.g., "function", "api").
+ * @param type The type of implementation (e.g., "function", "api", "scraping").
  * @returns Object with `isValid` (boolean) and optional `error` (string).
  */
 export function validateImplementationString(
@@ -79,6 +81,28 @@ export function validateImplementationString(
                 error: 'Implementation Error (type: api): \'parameterMapping.body\' cannot be used with GET method.'
             };
         }
+
+    } else if (type === "scraping") {
+        // --- NEW Scraping validation logic ---
+        let parsedConfig: any;
+        try {
+            parsedConfig = JSON.parse(trimmedImplementation);
+        } catch (e) {
+            logger.warn(`validateImplementationString (Scraping type): JSON parsing failed for implementation: ${trimmedImplementation.substring(0, 100)}...`, { error: e });
+            return { isValid: false, error: 'Implementation Error (type: scraping): Implementation string is not valid JSON.' };
+        }
+
+        // Use the imported Zod schema for scraping config
+        const validationResult = scrapingToolImplementationConfigSchema.safeParse(parsedConfig);
+        if (!validationResult.success) {
+            const errorMessages = validationResult.error.errors.map(err => `${err.path.join('.') || 'config'}: ${err.message}`).join('; ');
+            logger.warn(`validateImplementationString (Scraping type): Invalid scraping configuration`, { errors: errorMessages });
+            return {
+                isValid: false,
+                error: `Implementation Error (type: scraping): Invalid scraping configuration. Issues: ${errorMessages}`
+            };
+        }
+        // --- End Scraping validation ---
 
     } else {
         // Unknown or unsupported type

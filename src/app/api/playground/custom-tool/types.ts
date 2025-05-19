@@ -16,6 +16,7 @@ export interface ToolDetails extends ToolListItem {
     purpose?: string;
     expectedOutput?: string;
     implementation?: string;
+    implementationType?: string;
     metadata?: {
         category?: string;
         additionalContext?: string;
@@ -39,6 +40,7 @@ export interface GeneratedToolDefinition {
     parameters: ToolInputParameter[]; // Use the consistent type
     expectedOutput?: string;
     implementation: string;
+    requiredCredentialNames?: Array<{ name: string; label: string }>;
     parametersSchema?: string; // Keep this if it's part of the response
     implementationType?: string;
     category?: string;

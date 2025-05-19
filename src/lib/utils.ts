@@ -10,16 +10,26 @@ export const MODEL_JSON = () => {
   return UTILS_getModelsJSON();
 };
 
+// Helper function to map JSON provider keys (potentially title case) to ModelProviderEnum values (uppercase)
+function mapJsonProviderKeyToEnum(jsonKey: string): ModelProviderEnum {
+  const upperKey = jsonKey.toUpperCase();
+  // Find the enum member whose value matches the uppercased key
+  // ModelProviderEnum values are themselves uppercase strings e.g. ModelProviderEnum.OPENAI is "OPENAI"
+  const enumMember = Object.values(ModelProviderEnum).find(
+    (value) => value === upperKey
+  );
+  return enumMember || ModelProviderEnum.OPENAI; // Default to OPENAI if no match found
+}
+
 export const UTILS_getModelArgsByName = (modelName: string, temperature: number = 0): ModelArgs => {
   // Find which provider has this model
   const modelsData = MODEL_JSON();
-  for (const provider in modelsData) {
-    const providerData = modelsData[provider as keyof typeof modelsData];
+  for (const providerKeyFromJson in modelsData) { // providerKeyFromJson is the key like "OpenAI", "Anthropic"
+    const providerData = modelsData[providerKeyFromJson as keyof typeof modelsData];
     if (modelName in providerData) {
-      // Use the provider from the loop instead of from modelInfo
       return {
         modelName: modelName,
-        provider: provider as unknown as ModelProviderEnum,
+        provider: mapJsonProviderKeyToEnum(providerKeyFromJson), // Use the helper to get correct enum value
         temperature: temperature
       };
     }
@@ -28,7 +38,7 @@ export const UTILS_getModelArgsByName = (modelName: string, temperature: number 
   // Default if model not found
   return {
     modelName: modelName,
-    provider: ModelProviderEnum.OPENAI,
+    provider: ModelProviderEnum.OPENAI, // Default correctly uses the enum member
     temperature: temperature
   };
 };
@@ -729,59 +739,29 @@ export function UTILS_serverMessagesToTranscript(messages: ServerMessage[]) {
           _state.contextSet.sets ?? [],
           ""
         );
-        _addedContext = `\n\n<PROJECT_CONTEXT>\n${_context}\n</PROJECT_CONTEXT>`;
-        _useContext++;
-        if (_useContext === 2) {
-          _useContext = 0;
-        }
+        _addedContext = `\n\n<PROJECT_CONTEXT>\n${_context}\n</PROJECT_CONTEXT>`
       }
-      const mainMessage = `${
-        m.role !== "user"
-          ? m.role.toUpperCase() + "-" + (m.agentName?.toUpperCase() ?? "")
-          : "CLIENT"
-      }: ${m.content}${_addedContext}`;
-
-      if (m.subMessages && m.subMessages.length > 0) {
-        const subMessages = m.subMessages
-          .map(
-            (sub) =>
-              ` **To ${sub.agentName ?? "unknown-agent"} : ${sub.content}`
-          )
-          .join(`\n\n`);
-        // .join(`\n------\n`);
-        return `${subMessages}\n\n${mainMessage}`;
-      }
-      return mainMessage;
+      return `${m.role}: ${m.content}${_addedContext}`;
     })
-    .join(`\n\n`);
-  // .join(`\n------\n`) + `\n------\n`;
+    .join("\n");
   return tranScriptWithNames;
 }
-// export function UTILS_serverMessagesToTranscript(messages: ServerMessage[]) {
-//   const tranScriptWithNames = messages
-//     .map((m) => {
-//       const mainMessage = `${
-//         m.role !== "user"
-//           ? m.role.toUpperCase() + "-" + (m.agentName?.toUpperCase() ?? "")
-//           : "CLIENT"
-//       }: ${m.content}`;
-//       if (m.subMessages && m.subMessages.length > 0) {
-//         const subMessages = m.subMessages
-//           .map(
-//             (sub) =>
-//               ` **To ${sub.agentName ?? "unknown-agent"} : ${sub.content}`
-//           )
-//           .join(`\n\n`);
-//         // .join(`\n------\n`);
-//         return `${subMessages}\n\n${mainMessage}`;
-//       }
-//       return mainMessage;
-//     })
-//     .join(`\n\n`);
-//   // .join(`\n------\n`) + `\n------\n`;
-//   return tranScriptWithNames;
-// }
 
+// export const UTILS_cleanNewlines = (text: string): string => {
+//   // Replace 3 or more newlines with 2 newlines
+//   return text.replace(/\n{3,}/g, '\n\n').trim();
+// };
+
+// // clears the state variables in a conversation
+// export const UTILS_cleanConversationForStorage = (conversation: ServerMessage[]) => {
+//   return conversation.map((m) => {
+//     return {
+//       ...m,
+//       currentState: "",
+      
+//     } as ServerMessage;
+//   });
+// };
 export function UTILS_extractAgentNamesFromConversation(
   messages: ServerMessage[]
 ) {
@@ -937,3 +917,4 @@ export const mapToFullModelName = (shortName: string): string => {
 };
 
 // --- END: Functions moved from autogen.ts ---
+

@@ -19,11 +19,23 @@ export async function performVerification(
     try {
         if (analysis.recommendedType === "api") {
             // TODO: Improve endpoint extraction logic
-            let endpoint = analysis.strategyDetails.match(/https?:\/\/[^\s'"]+/)?.[0]; // Basic URL extraction
-            if(!endpoint && analysis.strategyDetails.toLowerCase().includes("endpoint")) {
-                // Maybe add more sophisticated regex or parsing if needed
-                endpoint = "https://placeholder.needs_better_extraction.com/api"; // Fallback placeholder
+
+            // 1. Prioritize the structured extractedApiEndpoint if available
+            let endpoint = analysis.extractedApiEndpoint;
+
+            // 2. If not found, then try to extract from strategyDetails
+            if (!endpoint) {
+                // Existing regex for basic URL extraction from strategyDetails
+                endpoint = analysis.strategyDetails.match(/https?:\/\/[^\s'"]+/)?.[0];
             }
+            
+            // 3. If still not found after the above attempts, and "endpoint" or "API" is mentioned in strategyDetails,
+            //    this path will eventually lead to the 'else' block below which correctly marks verification as failure.
+            //    We avoid assigning a generic placeholder here to ensure that a failure due to no extractable URL is explicit.
+            // if(!endpoint && analysis.strategyDetails.toLowerCase().includes("endpoint")) {
+            // // Maybe add more sophisticated regex or parsing if needed
+            // endpoint = "https://placeholder.needs_better_extraction.com/api"; // Fallback placeholder - REMOVED
+            // }
 
 
             if (endpoint) {
@@ -63,7 +75,62 @@ export async function performVerification(
                 details = 'Verification Failed: Could not determine a valid API endpoint from the current analysis details. A more detailed search may be required.';
                  logger.warn("Verification Logic: Could not extract endpoint for API verification, marking as failure.", { details: analysis.strategyDetails });
             }
+        } else if (analysis.recommendedType === "scraping") {
+            logger.info("Verification Logic: Handling scraping type verification.");
+            let targetUrl = analysis.suggestedBaseDomain; // Prioritize suggestedBaseDomain
+
+            if (!targetUrl) {
+                logger.debug("Verification Logic: suggestedBaseDomain not found, falling back to input/details URL extraction for scraping.");
+                // Fallback: Try to get URL from tool inputs
+                targetUrl = toolRequest.inputs.find((inp: ToolInputParameter) => inp.name.toLowerCase().includes('url'))?.default as string;
+                if (!targetUrl) {
+                    // Fallback: Try to extract from strategyDetails (general URL regex)
+                    targetUrl = analysis.strategyDetails.match(/https?:\/\/[^\s'"]+/)?.[0];
+                }
+            }
+
+            if (targetUrl) {
+                // Ensure targetUrl starts with http:// or https:// for the fetch call
+                if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+                    targetUrl = `https://${targetUrl}`;
+                }
+                logger.debug(`Verification Logic: Checking target URL for scraping: ${targetUrl}`);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000); // Slightly longer timeout
+
+                try {
+                    const response = await fetch(targetUrl, {
+                        headers: { 'User-Agent': userAgent },
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        status = 'success';
+                        details = `Scraping Target URL (${targetUrl}) basic check successful (Status: ${response.status}).`;
+                    } else {
+                        status = 'failure';
+                        details = `Scraping Target URL (${targetUrl}) check failed (Status: ${response.status}). Might be blocked or incorrect.`;
+                    }
+                } catch (fetchError: any) {
+                    clearTimeout(timeoutId);
+                    status = 'failure';
+                    if (fetchError.name === 'AbortError') {
+                        details = `Scraping Target URL (${targetUrl}) check failed (Request timed out after 8s).`;
+                    } else {
+                        details = `Scraping Target URL (${targetUrl}) check failed (Network Error: ${fetchError.message}).`;
+                    }
+                }
+            } else {
+                status = 'skipped';
+                details = 'Verification skipped for scraping: No target URL could be determined from suggestedBaseDomain, inputs, or strategy details.';
+                logger.warn("Verification Logic: Scraping verification skipped, no target URL.");
+            }
+
         } else if (analysis.recommendedType === "function") {
+            // For "function" type, we keep the existing logic which might detect scraping attempts within general functions.
+            // This is now more of a fallback if a strategy wasn't explicitly marked as "scraping" by the LLM.
+            logger.info("Verification Logic: Handling function type verification (may include implicit scraping check).");
             // TODO: Improve scraping detection logic
             const isScraping = analysis.strategyDetails.toLowerCase().includes("scrape") ||
                                analysis.strategyDetails.toLowerCase().includes("fetch") ||
@@ -128,6 +195,6 @@ export async function performVerification(
 export async function TOOLS_performBasicVerification(
     analysis: AnalysisResult,
     toolRequest: ToolRequest
-): Promise<VerificationResult | null> {
+): Promise<VerificationResult> {
   return performVerification(analysis, toolRequest);
 }

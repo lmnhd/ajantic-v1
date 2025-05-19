@@ -1,0 +1,125 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+
+**Phase 1: Initial Conception & Core Type Definition (Scraping Config)**
+
+1.  **Goal:** Introduce a new `scraping` tool implementation type.
+2.  **`ScrapingToolImplementationConfig` (`types.ts` & `validator.ts`):**
+    *   A comprehensive TypeScript interface and a corresponding Zod schema (`scrapingToolImplementationConfigSchema`) were defined. This was a highly iterative process.
+    *   **Key Fields Established:**
+        *   `implementationType: "scraping"` (fixed literal)
+        *   `baseDomain`: The root domain for the scraper.
+        *   `toolPurposeDescription`: For runtime context.
+        *   `sourceFinderConfig`: To locate the target page.
+            *   `enabledStrategies`: An array of `PageFindingStrategy` objects (e.g., `{ strategyType: SourceFindingStrategyType.CONFIGURED_URL_PATTERNS, input?: any }`). The `strategyType` uses enum *values* (e.g., "configuredUrlPatterns").
+            *   Specific configurations for each strategy (e.g., `urlPatterns`, `siteSearch`, `llmNavigation`).
+            *   **`urlPatterns` detailed structure:** An array of objects, each requiring `name`, `pattern` (URL string, can include `\${inputName}`), and `mapsToInput` (string, linking to a tool input).
+        *   `authConfig`: Defines authentication methods.
+            *   Initially, there was confusion about `requiredCredentialNames`. It was firmly established that for the *scraper's runtime config* (`ScrapingToolImplementationConfig` in `types.ts`), `authConfig.requiredCredentialNames` is an **array of strings** (credential names, e.g., `["USERNAME_CRED", "PASSWORD_CRED"]`). This contrasted with the main tool definition prompt which expected an array of objects `{name: string, label: string}`. This distinction became a recurring point of clarification.
+            *   For "form" auth, specific selectors (`usernameSelector`, `passwordSelector`, `submitSelector`) and `loginUrl` became mandatory.
+        *   `scrapingMethodsConfig`: Defines the core scraping approach.
+            *   `preferredMethod` (e.g., "firecrawl", "visual", "directHttpFetch").
+            *   Specific configurations for each method. For "firecrawl", this evolved to include `pageOptions` and `extractorOptions` (with `extractionPrompt` and `extractionSchema`). A key clarification was that custom `extractionInstructions` should *not* be directly under `firecrawl` but within `firecrawl.extractorOptions.extractionPrompt`.
+        *   `dataExtractionChain`: **Crucially, this was made a required field** in `ScrapingToolImplementationConfig`, defaulting to `[]` if not otherwise specified. It's an array of `DataExtractionChainStep` objects, each with `actionType` and `config`.
+
+**Phase 2: Execution Logic & Module Breakdown**
+
+1.  **Core Execution Orchestrator (`execution_logic.ts`):**
+    *   `executeScrapingTool(clerkId: string, config: ScrapingToolImplementationConfig, input: ScrapingToolInput): Promise<ScrapingToolOutput>` was defined.
+    *   `ScrapingToolInput`: `{ query: string; [key: string]: any; }`
+    *   `ScrapingToolOutput`: `{ scrapedData: string | null; sourceUrl?: string; errors?: string[]; }` (This interface was defined and explicitly exported).
+    *   **Execution Steps:**
+        1.  Fetch Credentials: Uses `clerkId` and `authConfig.requiredCredentialNames` (which are strings from the parsed config) to call `getDecryptedCredential`. This was a point of debugging, ensuring the correct string array was used.
+        2.  Find Target Page URL: Calls `findPageSource` from `page_finder_logic.ts`.
+        3.  Perform Authentication (if configured): Calls `performAuthentication` from `auth_handler.ts`.
+        4.  Get Initial Page Content: Calls `getContent` from `content_scraper.ts`.
+        5.  Process Data Extraction Chain: Calls `processDataExtractionChain` from `data_extractor.ts`.
+        6.  Return `ScrapingToolOutput`.
+    *   Error reporting within `executeScrapingTool` was enhanced to be more descriptive, pushing detailed error messages into the `errors` array.
+
+2.  **Modular Components:**
+    *   **`page_finder_logic.ts` (`findPageSource`):**
+        *   Iterates through `sourceFinderConfig.enabledStrategies`.
+        *   Calls individual strategy handlers (e.g., `_handleConfiguredUrlPatterns`, `_handleSiteSpecificSearch`).
+        *   Significant effort was put into improving error reporting:
+            *   Collects errors from *each* attempted strategy.
+            *   Returns a comprehensive error message if no URL is found.
+            *   Added defensive checks for undefined strategy types in `enabledStrategies`.
+        *   The `_handleConfiguredUrlPatterns` function was refined to correctly handle `mapsToInput` and placeholder replacement in URL patterns, and to perform basic fetch checks for URL validity.
+    *   **`auth_handler.ts` (`performAuthentication`):**
+        *   Logic for different auth methods (`form`, `basic`, `bearer`).
+        *   Refactored to use a global Puppeteer client (`puppeteer_client.ts`).
+        *   Correctly uses `authConfig.requiredCredentialNames` (array of strings) to fetch credential values.
+    *   **`content_scraper.ts` (`getContent`):**
+        *   Fetches initial page content using actions from `scraper_actions.ts`.
+    *   **`data_extractor.ts` (`processDataExtractionChain`):**
+        *   Iterates and executes steps in the `dataExtractionChain`.
+    *   **`scraper_actions.ts` (`executeScrapingAction`):**
+        *   A switch statement calls underlying scraping/extraction functions (Firecrawl, Visual Scraping, HTTP Fetch, LLM Extract from data).
+        *   Firecrawl actions were detailed: `FIRECRAWL_CRAWL_URL` (for raw content) and `FIRECRAWL_SCRAPE_URL` (for LLM-based extraction).
+        *   Logic for API key retrieval (from environment or credentials) was added.
+        *   Placeholders for LLM and Visual Scraping execution were noted.
+    *   **`puppeteer_client.ts`:** Manages a global Puppeteer instance (local via `chrome-finder` or remote via Browserbase).
+
+**Phase 3: Integration with Tool Factory & AI Generation**
+
+1.  **Tool Factory (`factory.ts` - `createExecuteFunction`):**
+    *   The `case "scraping":` block was implemented.
+    *   **Parsing & Validation:** Parses the `toolEntry.implementation` (JSON string) into `ScrapingToolImplementationConfig`.
+        *   **Key Fix:** Ensured the parsed `scrapingConfig` object *always* has a `dataExtractionChain` property (typed as `DataExtractionChainStep[]`), defaulting to `[]` if missing or not an array in the raw JSON. This involved explicitly constructing the `scrapingConfig` field by field from the parsed object to satisfy TypeScript, resolving critical linter errors.
+    *   **Execution:** Calls `executeScrapingTool(toolEntry.userId, scrapingConfig, params)`.
+    *   **Output Handling:**
+        *   If `scrapingToolOutput.errors` exist, they are formatted into a detailed multi-line error message (including tool name, attempted URL, and a list of errors) for the UI.
+        *   If successful, uses `scrapingToolOutput.scrapedData`.
+    *   The `catch` block for unexpected errors during execution was also made more verbose.
+
+2.  **AI Tool Generation Prompt (`auto-gen-tool_core.ts` - `CORE_generateCustomToolDefinition`):**
+    *   The `systemPrompt` was extensively updated to guide the LLM in constructing the `ScrapingToolImplementationConfig` JSON string. This was a highly iterative process.
+    *   **Prompt Refinements for Scraping Config:**
+        *   Ensuring `implementationType` is the JSON string value `"scraping"`.
+        *   Clarifying `sourceFinderConfig.enabledStrategies` must be an array of JSON string values corresponding to `SourceFindingStrategyType` enum *values* (e.g., `"configuredUrlPatterns"`).
+        *   Detailing `sourceFinderConfig.urlPatterns[]` structure: each object needs `name`, `pattern`, and `mapsToInput`. Explicit guidance on how `mapsToInput` relates to placeholders in `pattern` and tool inputs was added.
+        *   Detailing `authConfig`: requirements for `form` method (selectors, loginUrl), `apiKeyHeader` method (`apiKeyHeaderName`), and `bearerToken` method (`apiKeyHeaderName` usually "Authorization"). Explicitly stating `authConfig.requiredCredentialNames` should be an array of JSON objects `[{name: string, label: string}]` in *this context* (the AI generation output for the main tool definition).
+        *   Detailing `scrapingMethodsConfig`: structure for `firecrawl` (with `pageOptions` and `extractorOptions`), emphasizing that `firecrawl.extractorOptions.extractionPrompt` is the place for extraction instructions, not a separate `extractionInstructions` field under `firecrawl`.
+        *   **`dataExtractionChain` was repeatedly emphasized as ABSOLUTELY REQUIRED**, even if an empty array `[]`. Example structures were provided.
+        *   **Escaping:** Debugging issues with escaping `\${agentQuery}` within the prompt's example JSON for `extractionPrompt` or `dataExtractionChain`. The correct escaping for a JS template literal to produce a literal `${agentQuery}` in the output JSON string is `\\${agentQuery}`. This took several tries to get right.
+        *   A `scrapingToolImplementationConfigPromptSchemaShape` object was defined to provide a clear structural example within the prompt.
+    *   The main tool definition's `requiredCredentialNames` (array of objects `{name, label}`) vs. the scraper's runtime `authConfig.requiredCredentialNames` (array of strings) was noted as a point of necessary transformation or careful handling.
+
+**Phase 4: UI & API Endpoint Adjustments**
+
+1.  **UI (`ToolSelectionAndExecutionCard.tsx` & `page.tsx`):**
+    *   CSS fix for text wrapping in error display (`<pre>` tag).
+    *   Payload construction in `proceedToCodeGeneration` (`page.tsx`) for the `/api/playground/generate-tool-definition` endpoint was debugged. The issue was ensuring `modelArgs` and `acceptedStrategy` were correctly placed within the `toolRequestData` object for the backend `CORE_generateCustomToolDefinition` function, while `modelArgs` also needed to be at the top level of the API payload for Zod validation in the route. This involved understanding the nested structure expected by `ToolRequest` which can contain an `acceptedStrategy` of type `StrategyAnalysis`, which itself contains the actual `AnalysisResult`.
+    *   Type errors related to `StrategyAnalysis` (declared locally vs. imported/re-exported) were resolved by ensuring it was correctly exported from `lib/types.ts`.
+    *   A `modelArgs` field was incorrectly added to a nested object and then removed to fix linter errors.
+
+2.  **API Endpoint (`/api/playground/generate-tool-definition/route.ts`):**
+    *   The Zod schema `generateDefinitionRequestSchema` was reviewed to understand the expected payload structure, leading to the frontend fixes.
+    *   A ZodError related to `modelArgs.provider` case sensitivity (e.g., "OpenAI" vs "OPENAI") was identified. The fix involved ensuring `UTILS_getModelArgsByName` in `lib/utils.ts` correctly maps the title-case provider key from `vercel_models.json` to the uppercase `ModelProviderEnum` value.
+
+**Phase 5: Ongoing Debugging & Refinements**
+
+*   **Prisma Error (`[object Object]` for `credentialName`):**
+    *   **Cause:** `getDecryptedCredential` in `execution_logic.ts` received an object for `credName`.
+    *   **Fix:** Corrected the loop in `execution_logic.ts` to iterate `authConfig.requiredCredentialNames` (which is `string[]` in the parsed `ScrapingToolImplementationConfig`) and use its elements directly.
+*   **Page Finding Error (`undefined: Unknown strategy: undefined`):**
+    *   **Cause:** `sourceFinderConfig.enabledStrategies` in the tool's JSON configuration had invalid entries.
+    *   **Fix:** Recommended manual JSON correction and made `page_finder_logic.ts` more resilient by checking for and skipping undefined strategy types.
+*   **Factory Linter Errors (`dataExtractionChain` missing, `ScrapingToolOutput` not found):** Addressed by exporting types and ensuring `dataExtractionChain` is always present and correctly typed in `factory.ts`.
+*   **Linter Errors in `auto-gen-tool_core.ts`:**
+    *   An "element access expression should take an argument" error related to backticks in a comment was fixed by rephrasing and escaping.
+*   **Discussion on Structured Output:** Acknowledged that using structured output models (like `generateObject` with a Zod schema for the scraping config itself, rather than generating a JSON *string*) would be a wise future direction to avoid many of the JSON formatting and escaping issues encountered in the prompt engineering for `CORE_generateCustomToolDefinition`.
+
+Throughout this process, there was a strong emphasis on:
+*   **Precise Typing:** Ensuring TypeScript interfaces and Zod schemas were accurate and consistently used.
+*   **Robust Error Handling:** Improving error messages and ensuring errors from different stages (page finding, auth, execution, factory) were collected and reported clearly to the UI.
+*   **Iterative Prompt Engineering:** Refining the system prompt for the AI to generate correct and valid scraping JSON configurations.
+*   **Modularity:** Building the system with distinct, manageable modules for different aspects of the scraping process.
+
+The development involved a lot of back-and-forth, with initial implementations leading to type errors, runtime errors, or incorrect AI-generated configurations, followed by debugging, type refinement, and prompt adjustments.
+

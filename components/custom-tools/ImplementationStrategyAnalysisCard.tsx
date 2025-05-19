@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ConsultationRound } from '@/src/app/api/playground/analyze-implementation-strategy/_types'; // Adjust path as per your project
+import { ConsultationRound, RecommendedImplementationType } from '@/src/app/api/playground/analyze-implementation-strategy/_types'; // Adjust path as per your project
 
-interface ImplementationStrategyAnalysisCardProps {
+export interface ImplementationStrategyAnalysisCardProps { // Exporting the interface
   consultationRound: ConsultationRound | null;
   strategyError: string | null;
   isAnalyzing: boolean;
@@ -22,6 +22,9 @@ interface ImplementationStrategyAnalysisCardProps {
   title?: string;
   description?: string;
   isAccepted?: boolean; // To conditionally disable or change the accept button
+  // New props for exampleTargetPageUrl
+  exampleTargetPageUrl?: string;
+  onExampleTargetPageUrlChange?: (url: string) => void;
 }
 
 const ImplementationStrategyAnalysisCard: React.FC<ImplementationStrategyAnalysisCardProps> = ({
@@ -40,6 +43,8 @@ const ImplementationStrategyAnalysisCard: React.FC<ImplementationStrategyAnalysi
   title = "Implementation Strategy Analysis",
   description = "Review the analysis below. You can refine the strategy or accept it.",
   isAccepted = false,
+  exampleTargetPageUrl,
+  onExampleTargetPageUrlChange,
 }) => {
   if (!consultationRound) {
     // Optionally, render a loading state or null if no round data is available yet
@@ -61,10 +66,38 @@ const ImplementationStrategyAnalysisCard: React.FC<ImplementationStrategyAnalysi
           <p><strong>Recommendation:</strong> {currentRound.analysis.recommendedType}</p>
           <p><strong>Details:</strong> <span className="font-mono text-xs bg-slate-800/50 px-1 py-0.5 rounded">{currentRound.analysis.strategyDetails}</span></p>
           {currentRound.analysis.requiredCredentialName && <p><strong>Requires Credential:</strong> <span className="font-semibold text-orange-300">{currentRound.analysis.requiredCredentialName}</span></p>}
+          {/* Display exampleTargetPageUrl if present in the analysis data itself (e.g. from LLM) */}
+          {currentRound.analysis.exampleTargetPageUrl && (
+            <p><strong>Hint URL (from analysis):</strong> <span className="font-mono text-xs text-purple-300">{currentRound.analysis.exampleTargetPageUrl}</span></p>
+          )}
           {currentRound.analysis.warnings && currentRound.analysis.warnings.length > 0 && <p><strong>Warnings:</strong> <span className="text-orange-300">{currentRound.analysis.warnings.join('; ')}</span></p>}
           <Separator className="bg-yellow-700 my-2" />
-          <p><strong>Verification:</strong> <span className={currentRound.verification.status === 'success' ? 'text-green-400' : currentRound.verification.status === 'failure' ? 'text-red-400' : 'text-slate-400'}>{currentRound.verification.status}</span> - {currentRound.verification.details}</p>
+          {/* Ensure verification object exists before accessing its properties */}
+          {currentRound.verification && (
+            <p><strong>Verification:</strong> <span className={currentRound.verification.status === 'success' ? 'text-green-400' : currentRound.verification.status === 'failure' ? 'text-red-400' : 'text-slate-400'}>{currentRound.verification.status}</span> - {currentRound.verification.details}</p>
+          )}
         </div>
+
+        {/* Input for exampleTargetPageUrl if strategy is scraping and not accepted */}
+        {currentRound.analysis.recommendedType === RecommendedImplementationType.SCRAPING && !isAccepted && onExampleTargetPageUrlChange && (
+          <div className="mt-3 mb-3 space-y-1 pt-2 border-t border-yellow-800/50">
+            <Label htmlFor="exampleTargetPageUrlFromUser" className="text-xs font-medium text-yellow-300 block pt-2">
+              Example Target Page URL (Optional Hint for Scraping)
+            </Label>
+            <Input
+              id="exampleTargetPageUrlFromUser"
+              type="url"
+              value={exampleTargetPageUrl || ''}
+              onChange={(e) => onExampleTargetPageUrlChange(e.target.value)}
+              placeholder="https://site.com/path/to/data-page-after-login"
+              className="bg-slate-700 border-slate-600 text-slate-200 placeholder:text-slate-400 text-xs"
+              disabled={isAnalyzing}
+            />
+            <p className="text-xs text-yellow-400/70">
+              If data is on a page requiring login/navigation, paste the full URL. Helps immensely.
+            </p>
+          </div>
+        )}
 
         <Separator className="bg-yellow-700 my-2" />
 

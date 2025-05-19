@@ -258,11 +258,12 @@ model CustomTool {
   userId             String
   name               String
   description        String
-  parameters         String   // JSON string
-  implementation     String   // Code or endpoint or JSON like {"endpoint": "..."}
-  implementationType String   @default("function")
+  parameters         String   // JSON string for Zod schema of ToolParameter[]
+  implementation     String   // Code or endpoint or JSON config string for the specific implementationType
+  implementationType String   @default("function") // e.g., "function", "api", "scraping"
+  requiredCredentialNames String?  // JSON string for { name: string, label: string }[]
   acceptedStrategyJson String?  // JSON string for the accepted strategy analysis
-  metadata           String   // JSON string
+  metadata           String?  // JSON string for other metadata (category, purpose, examples etc.)
   version            Int      @default(1)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

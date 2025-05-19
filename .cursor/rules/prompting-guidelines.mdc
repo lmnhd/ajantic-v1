@@ -1,0 +1,100 @@
+---
+description: Prompting Protocol, Prompts, Prompting
+globs: 
+alwaysApply: false
+---
+# Prompting Guidelines and Process
+
+## Overview
+This document outlines the structured approach to creating and managing prompts in our codebase, following the guidelines established in [metaprompt.xml](mdc:ajantic-v1/src/lib/prompts/metaprompt.xml).
+
+## Core XML Structure
+All prompts should follow this XML structure:
+```xml
+<purpose>
+    Clear statement of the AI's role and goal
+</purpose>
+
+<instructions>
+    <instruction>Specific instruction 1</instruction>
+    <instruction>Specific instruction 2</instruction>
+    <!-- Additional instructions -->
+</instructions>
+
+<examples>
+    <example>
+        <scenario>Scenario description</scenario>
+        <input>Example input</input>
+        <output>Expected output</output>
+    </example>
+    <!-- Additional examples -->
+</examples>
+
+<user-input>
+    [[variable-name]]
+</user-input>
+```
+
+## Key Components
+
+### Purpose Section
+- Must clearly define the AI's role
+- Should state the primary goal
+- Keep it concise and focused
+
+### Instructions Section
+- Each instruction should be atomic and clear
+- Use `<instruction>` tags for each step
+- Order instructions logically
+- Include any critical constraints or requirements
+
+### Examples Section
+- Include at least 3 diverse examples
+- Each example should demonstrate a different aspect
+- Use consistent XML structure within examples
+- Include both input and expected output
+
+### Variables
+- Use `[[variable-name]]` format for placeholders
+- Document all variables in the prompt
+- Ensure variables are properly escaped
+
+## Implementation Guidelines
+
+### File Organization
+- Store prompts in `src/lib/prompts/`
+- Use `.xml` extension for prompt files
+- Follow naming convention: `purpose-name.xml`
+
+### Code Integration
+When using prompts in code:
+1. Import the prompt file
+2. Use template literals for variable substitution
+3. Validate the structure before sending to LLM
+4. Handle any XML parsing errors gracefully
+
+### Best Practices
+1. Keep prompts modular and reusable
+2. Document all variables and their purposes
+3. Include error handling instructions
+4. Test prompts with various inputs
+5. Maintain consistent formatting
+
+## Example Implementation
+See [llm_logic.ts](mdc:ajantic-v1/src/app/api/playground/analyze-implementation-strategy/_core/llm_logic.ts) for an example of how to implement these guidelines in code.
+
+## Validation
+Before deploying a prompt:
+1. Verify XML structure is valid
+2. Check all variables are properly defined
+3. Ensure examples cover edge cases
+4. Test with the target LLM model
+5. Validate output matches expected schema
+
+## Maintenance
+- Review prompts periodically
+- Update examples based on new use cases
+- Document any changes to the structure
+- Keep track of prompt performance
+- Maintain version control of prompt files
+

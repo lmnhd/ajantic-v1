@@ -10,10 +10,11 @@ export async function CUSTOM_TOOL_registerTool(
   name: string,
   description: string,
   parameters: any[],
-  implementation: string,
+  implementation: string | object,
   implementationType: string,
   metadata: { [key: string]: any },
-  acceptedStrategyJson?: string | null
+  acceptedStrategyJson?: string | null,
+  requiredCredentialNames?: Array<{ name: string; label: string }> | null
 ): Promise<string> {
   if (!userId) {
     logger.error("registerTool called without userId", { name });
@@ -26,6 +27,10 @@ export async function CUSTOM_TOOL_registerTool(
     metadata = { ...metadata, userId: userId };
   }
 
+  const finalImplementationString = typeof implementation === 'object' 
+    ? JSON.stringify(implementation) 
+    : implementation;
+
   try {
     const tool = await db.customTool.create({
       data: {
@@ -33,10 +38,11 @@ export async function CUSTOM_TOOL_registerTool(
         name,
         description,
         parameters: JSON.stringify(parameters),
-        implementation,
+        implementation: finalImplementationString,
         implementationType,
         metadata: JSON.stringify(metadata),
         acceptedStrategyJson: acceptedStrategyJson ?? undefined,
+        requiredCredentialNames: requiredCredentialNames ? JSON.stringify(requiredCredentialNames) : null,
         version: 1,
       },
     });
@@ -58,10 +64,11 @@ export async function CUSTOM_TOOL_updateTool(
     name?: string;
     description?: string;
     parameters?: any[];
-    implementation?: string;
+    implementation?: string | object;
     implementationType?: string;
     metadata?: { [key: string]: any };
     acceptedStrategyJson?: string | null;
+    requiredCredentialNames?: Array<{ name: string; label: string }> | null;
   }
 ): Promise<string> {
   try {
@@ -70,36 +77,51 @@ export async function CUSTOM_TOOL_updateTool(
       throw new Error(`Tool with ID ${id} not found`);
     }
 
-    let finalMetadata = currentTool.metadata;
+    const dataToUpdate: Prisma.CustomToolUpdateInput = {};
+
+    if (updates.name) dataToUpdate.name = updates.name;
+    if (updates.description) dataToUpdate.description = updates.description;
+    if (updates.parameters) dataToUpdate.parameters = JSON.stringify(updates.parameters);
+    
+    if (updates.implementation) {
+      dataToUpdate.implementation = typeof updates.implementation === 'object'
+        ? JSON.stringify(updates.implementation)
+        : updates.implementation;
+    }
+    
+    if (updates.implementationType) dataToUpdate.implementationType = updates.implementationType;
+    
+    if (updates.acceptedStrategyJson !== undefined) {
+        dataToUpdate.acceptedStrategyJson = updates.acceptedStrategyJson;
+    }
+
+    if (updates.requiredCredentialNames !== undefined) {
+        dataToUpdate.requiredCredentialNames = updates.requiredCredentialNames 
+            ? JSON.stringify(updates.requiredCredentialNames) 
+            : null;
+    }
+
+    let finalMetadataString = currentTool.metadata;
     if (updates.metadata) {
-       const currentMeta = JSON.parse(currentTool.metadata);
+       const currentMeta = JSON.parse(currentTool.metadata || '{}');
        const originalUserId = currentMeta.userId;
-       const updatedMeta = {
+       const updatedMetaContent = {
             ...currentMeta,
             ...updates.metadata,
             updatedAt: new Date().toISOString()
        };
-       if (originalUserId && updatedMeta.userId !== originalUserId) {
-            updatedMeta.userId = originalUserId;
+       if (originalUserId && updatedMetaContent.userId !== originalUserId) {
+            updatedMetaContent.userId = originalUserId; 
        }
-       finalMetadata = JSON.stringify(updatedMeta);
+       finalMetadataString = JSON.stringify(updatedMetaContent);
     }
+    dataToUpdate.metadata = finalMetadataString;
+    
+    dataToUpdate.version = (currentTool.version || 0) + 1;
 
     const updatedTool = await db.customTool.update({
       where: { id },
-      data: {
-        name: updates.name || currentTool.name,
-        description: updates.description || currentTool.description,
-        parameters: updates.parameters
-          ? JSON.stringify(updates.parameters)
-          : currentTool.parameters,
-        implementation: updates.implementation || currentTool.implementation,
-        implementationType:
-          updates.implementationType || currentTool.implementationType,
-        acceptedStrategyJson: updates.acceptedStrategyJson === null ? null : updates.acceptedStrategyJson ?? currentTool.acceptedStrategyJson,
-        metadata: finalMetadata,
-        version: currentTool.version + 1,
-      },
+      data: dataToUpdate,
     });
 
     logger.tool("Updated tool in registry", {
@@ -125,7 +147,7 @@ export async function CUSTOM_TOOL_getToolById(
   try {
     const tool = await db.customTool.findUnique({ where: { id } });
     logger.tool("Retrieved tool by ID", { toolId: id, userId: tool?.userId });
-    return tool;
+    return tool as any as ToolRegistryEntry | null;
   } catch (error) {
     logger.error("Failed to retrieve tool by ID", { id, error });
     return null;
@@ -150,7 +172,7 @@ export async function CUSTOM_TOOL_findToolByName(
        },
     });
     logger.tool("Attempted to find tool by name for user", { name, userId, found: !!tool });
-    return tool;
+    return tool as any as ToolRegistryEntry | null;
   } catch (error) {
     logger.error("Failed to find tool by name", { name, userId, error });
     return null;
@@ -167,7 +189,7 @@ export async function CUSTOM_TOOL_getToolsForUser(
       },
     });
      logger.tool("Retrieved tools for user", { userId, count: tools.length });
-    return tools;
+    return tools as any as ToolRegistryEntry[];
   } catch (error) {
     logger.error("Failed to retrieve tools for user", { userId, error });
     return [];
@@ -193,7 +215,7 @@ export async function CUSTOM_TOOL_listAllTools(userId: string): Promise<ToolRegi
   try {
     const tools = await db.customTool.findMany({ where: { userId: userId } });
     logger.tool("Listed tools for user", { userId: userId, count: tools.length });
-    return tools;
+    return tools as any as ToolRegistryEntry[];
   } catch (error) {
     logger.error("Failed to list tools", { userId, error });
     return [];
